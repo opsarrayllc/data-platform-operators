@@ -191,6 +191,18 @@ kubebuilder create api --group dataplatform --version v1alpha1 --kind <Kind> --r
 
 Then re-run `make manifests generate`.
 
+## Local kind cluster
+
+```bash
+make kind-up
+make run
+kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
+```
+
+That brings up Keycloak, LakeKeeper, and Trino behind mkcert TLS on
+`*.data-platform.local`. To query Trino from DBeaver-CE, see
+[docs/dbeaver.md](docs/dbeaver.md).
+
 ## Notes
 
 - `config/crd/bases/*`, `config/rbac/role.yaml`, `**/zz_generated.*.go`, and `PROJECT`

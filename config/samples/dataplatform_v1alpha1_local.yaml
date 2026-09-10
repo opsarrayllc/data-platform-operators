@@ -6,6 +6,7 @@
 #
 # Hosts (also printed by kind-up): 127.0.0.1 keycloak.data-platform.local lakekeeper.data-platform.local trino.data-platform.local
 # Login user admin; password is in secret keycloak/keycloak-admin.
+# DBeaver against Trino: docs/dbeaver.md (OAuth2 + mkcert trust; not username/password).
 apiVersion: dataplatform.opsarray.io/v1alpha1
 kind: DataPlatform
 metadata:
