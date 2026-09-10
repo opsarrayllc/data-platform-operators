@@ -59,6 +59,25 @@ fi
 echo "==> Installing ingress-nginx"
 kc apply -f "${INGRESS_MANIFEST}"
 kc -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
+# The validating webhook is served by the controller, but its Service endpoints
+# and cert Jobs can lag rollout status. Applying Ingresses too early fails with
+# "failed calling webhook ... connection refused".
+echo "==> Waiting for ingress-nginx admission webhook"
+# Jobs may already be gone (ttlSecondsAfterFinished); endpoints + apply retry
+# are the real readiness gate.
+kc -n ingress-nginx wait --for=condition=complete job/ingress-nginx-admission-create --timeout=120s 2>/dev/null || true
+kc -n ingress-nginx wait --for=condition=complete job/ingress-nginx-admission-patch --timeout=120s 2>/dev/null || true
+for _ in $(seq 1 60); do
+	if ip="$(kc -n ingress-nginx get endpoints ingress-nginx-controller-admission \
+		-o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null)" && [ -n "${ip}" ]; then
+		break
+	fi
+	sleep 2
+done
+if [ -z "${ip:-}" ]; then
+	echo "error: ingress-nginx admission webhook has no endpoints" >&2
+	exit 1
+fi
 
 echo "==> Issuing mkcert wildcard for *.${DOMAIN}"
 mkdir -p "${CERT_DIR}"
@@ -75,7 +94,18 @@ for ns in "${NAMESPACES[@]}"; do
 done
 
 echo "==> Applying Ingresses"
-kc apply -f "${INGRESS_RESOURCES}"
+# Retry: webhook can still refuse briefly after endpoints appear.
+for attempt in $(seq 1 30); do
+	if kc apply -f "${INGRESS_RESOURCES}"; then
+		break
+	fi
+	if [ "${attempt}" -eq 30 ]; then
+		echo "error: failed to apply Ingresses after ${attempt} attempts" >&2
+		exit 1
+	fi
+	echo "    webhook not ready yet (attempt ${attempt}/30); retrying..."
+	sleep 2
+done
 
 echo "==> Installing DataPlatform CRDs"
 make -C "${ROOT}" install KUBECONFIG="${KUBECONFIG_FILE}"
