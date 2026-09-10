@@ -20,7 +20,8 @@
 #         ]}}'
 #
 # The OPENFGA_API_KEY is in secret openfga/openfga, key apiKey. Tuple users are
-# Trino usernames, which is the preferred_username claim.
+# Trino usernames, which is the OIDC `sub` claim (for local Keycloak admin:
+# user:00000000-0000-4000-8000-000000000001).
 #
 # A user with no row-filter grant sees no rows. A user with no column grant
 # sees NULL (or the configured mask) in that column. Both fail closed if

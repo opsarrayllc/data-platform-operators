@@ -50,7 +50,11 @@ type oidcConfig struct {
 	adminEmail   string
 	// opaSubject is the OIDC subject of the OPA bridge's service account, which
 	// needs its own grant to inspect other users' permissions.
-	opaSubject     string
+	opaSubject string
+	// trinoSubject is the OIDC subject of Trino's confidential client. The
+	// Iceberg REST connector authenticates as this principal, so it needs
+	// project access to resolve warehouses.
+	trinoSubject   string
 	tokenURL       string
 	proxyNamespace string
 	proxyService   string

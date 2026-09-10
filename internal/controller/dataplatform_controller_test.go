@@ -255,6 +255,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(catalog.bootstraps).To(Equal(1))
 		Expect(catalog.warehouses).To(ContainElement("default"))
 		Expect(catalog.grants).To(ContainElement("oidc~" + dataplatformv1alpha1.DefaultOIDCAdminUserID + "=admin/project_admin"))
+		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/project_admin")))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/security_admin")))
 
 		updated := &dataplatformv1alpha1.DataPlatform{}

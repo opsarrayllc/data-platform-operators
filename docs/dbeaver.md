@@ -34,7 +34,7 @@ On macOS/Windows the `cacerts` path differs (look under the DBeaver install for
 | Host | `trino.data-platform.local` |
 | Port | `443` |
 | Database / catalog | optional (for example `lakekeeper`) |
-| Username | leave blank, or `admin` |
+| Username | leave **blank**, or use the OIDC `sub` (`00000000-0000-4000-8000-000000000001` for local admin). Do **not** use `admin` — Trino's principal is the `sub` claim, and a mismatched Username triggers `cannot impersonate user admin`. |
 | Password | leave **empty** |
 | SSL | enabled |
 

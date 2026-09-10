@@ -153,7 +153,7 @@ func trinoOAuthProperties(oidc oidcConfig) map[string]string {
 		"http-server.authentication.oauth2.client-id":            oidc.trinoClientID,
 		"http-server.authentication.oauth2.client-secret":        oidc.trinoSecret,
 		"http-server.authentication.oauth2.scopes":               "openid",
-		"http-server.authentication.oauth2.principal-field":      "preferred_username",
+		"http-server.authentication.oauth2.principal-field":      "sub",
 		"http-server.authentication.oauth2.additional-audiences": oidc.audience,
 	}
 	if oidc.proxyService != "" && oidc.publicIssuer != "" && oidc.publicIssuer != oidc.issuer {

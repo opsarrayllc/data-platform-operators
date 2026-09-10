@@ -151,6 +151,7 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 		adminName:        dataplatformv1alpha1.DefaultOIDCAdminUser,
 		adminEmail:       keycloakAdminEmail,
 		opaSubject:       keycloakUUID("service-account", opaID),
+		trinoSubject:     keycloakUUID("service-account", trinoID),
 		tokenURL:         oidcTokenURL(issuer),
 		proxyNamespace:   ns,
 		proxyService:     nameKeycloak,

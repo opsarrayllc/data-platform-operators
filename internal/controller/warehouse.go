@@ -93,6 +93,17 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) [
 		ServerRelation:  "admin",
 		ProjectRelation: "project_admin",
 	}}
+	// Trino's Iceberg REST connector uses client-credentials as this
+	// application. Without a project grant LakeKeeper hides warehouses and
+	// Trino surfaces "A warehouse '…' does not exist".
+	if oidc.trinoSubject != "" {
+		principals = append(principals, CatalogPrincipal{
+			Subject:         oidcSubjectPrefix + oidc.trinoSubject,
+			Name:            oidc.trinoClientID,
+			Type:            "application",
+			ProjectRelation: "project_admin",
+		})
+	}
 	// The OPA bridge asks LakeKeeper whether other users may act, which is a
 	// privileged read it cannot perform without security_admin.
 	if dp.Spec.Authz.IsEnabled() && oidc.opaSubject != "" {

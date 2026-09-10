@@ -172,7 +172,7 @@ curl -sS "$OPENFGA/stores/$STORE/write" \
 
 The default column object is `{catalog}.{schema}.{table}.{column}`. Set
 `openfga.object` to a short name such as `ssn` to share one grant across
-tables. Tuple users are Trino usernames (the `preferred_username` claim), and a
+tables. Tuple users are Trino usernames (the OIDC `sub` claim), and a
 relation may be granted to a user directly or to a group's members.
 
 Both features fail closed: a user with no row-filter grant sees no rows, a
