@@ -85,3 +85,19 @@ spec:
     #     connector.name=tpch
     service:
       type: ClusterIP
+  # Shared Flink session cluster for streaming / CDC jobs.
+  # Submit many pipelines to this one cluster.
+  flink:
+    enabled: true
+    # image: flink:1.20.5
+    # publicURL: https://flink.example.com
+    taskManagers: 1
+    taskSlots: 2
+    # jobManager:
+    #   processMemory: 1600m
+    # taskManager:
+    #   processMemory: 1728m
+    # extraConfig:
+    #   parallelism.default: "2"
+    service:
+      type: ClusterIP

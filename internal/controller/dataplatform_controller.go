@@ -82,6 +82,13 @@ func (r *DataPlatformReconciler) reconcile(ctx context.Context, dp *dataplatform
 	}
 	progressing = progressing || trinoProgressing
 
+	flinkProgressing, err := r.reconcileFlinkStack(ctx, dp, oidc)
+	if err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionFalse, reasonError, err.Error())
+		return ctrl.Result{}, err
+	}
+	progressing = progressing || flinkProgressing
+
 	if progressing {
 		setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionFalse, reasonReconciling, "Waiting for enabled components to become ready")
 		return ctrl.Result{RequeueAfter: requeueWhileProgressing}, nil

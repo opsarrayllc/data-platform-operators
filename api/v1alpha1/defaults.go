@@ -116,6 +116,46 @@ func (s *TrinoSpec) WorkersOrDefault() int32 {
 	return int32OrDefault(s.Workers, 0)
 }
 
+// IsEnabled reports whether Flink should be deployed. Nil defaults to true.
+func (s *FlinkSpec) IsEnabled() bool {
+	return boolDefaultTrue(s.Enabled)
+}
+
+// NamespaceOrDefault returns the Flink namespace.
+func (s *FlinkSpec) NamespaceOrDefault() string {
+	return stringOrDefault(s.Namespace, DefaultFlinkNamespace)
+}
+
+// ImageOrDefault returns the Flink image.
+func (s *FlinkSpec) ImageOrDefault() string {
+	return stringOrDefault(s.Image, DefaultFlinkImage)
+}
+
+// OAuth2ProxyImageOrDefault returns the oauth2-proxy image.
+func (s *FlinkSpec) OAuth2ProxyImageOrDefault() string {
+	return stringOrDefault(s.OAuth2ProxyImage, DefaultOAuth2ProxyImage)
+}
+
+// TaskManagersOrDefault returns the TaskManager replica count.
+func (s *FlinkSpec) TaskManagersOrDefault() int32 {
+	return int32OrDefault(s.TaskManagers, DefaultFlinkTaskManagers)
+}
+
+// TaskSlotsOrDefault returns taskmanager.numberOfTaskSlots.
+func (s *FlinkSpec) TaskSlotsOrDefault() int32 {
+	return int32OrDefault(s.TaskSlots, DefaultFlinkTaskSlots)
+}
+
+// ProcessMemoryOrDefault returns jobmanager.memory.process.size.
+func (s *FlinkJobManagerSpec) ProcessMemoryOrDefault() string {
+	return stringOrDefault(s.ProcessMemory, DefaultFlinkJMProcessMem)
+}
+
+// ProcessMemoryOrDefault returns taskmanager.memory.process.size.
+func (s *FlinkTaskManagerSpec) ProcessMemoryOrDefault() string {
+	return stringOrDefault(s.ProcessMemory, DefaultFlinkTMProcessMem)
+}
+
 // TypeOrDefault returns the Service type.
 func (s *ServiceSpec) TypeOrDefault() corev1.ServiceType {
 	if s.Type == "" {

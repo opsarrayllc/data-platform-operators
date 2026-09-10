@@ -112,7 +112,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 	})
 
-	It("creates MinIO, Keycloak, Postgres, LakeKeeper, and Trino resources", func() {
+	It("creates MinIO, Keycloak, Postgres, LakeKeeper, Trino, and Flink resources", func() {
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -177,6 +177,32 @@ var _ = Describe("DataPlatform Controller", func() {
 		By("creating the Trino coordinator wired to MinIO and OIDC")
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, deploy)).To(Succeed())
 		Expect(deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(ptr.To(uidTrino)))
+
+		By("creating the Flink session cluster")
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkJobManager, Namespace: nameFlink}, deploy)).To(Succeed())
+		Expect(deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(ptr.To(uidFlink)))
+		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"jobmanager"}))
+		var flinkProps *corev1.EnvVar
+		for i := range deploy.Spec.Template.Spec.Containers[0].Env {
+			if deploy.Spec.Template.Spec.Containers[0].Env[i].Name == "FLINK_PROPERTIES" {
+				flinkProps = &deploy.Spec.Template.Spec.Containers[0].Env[i]
+				break
+			}
+		}
+		Expect(flinkProps).NotTo(BeNil())
+		Expect(flinkProps.ValueFrom).NotTo(BeNil())
+		Expect(flinkProps.ValueFrom.ConfigMapKeyRef.Name).To(Equal(configMapFlink))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkTaskManager, Namespace: nameFlink}, deploy)).To(Succeed())
+		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"taskmanager"}))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkJobManager, Namespace: nameFlink}, svc)).To(Succeed())
+		flinkCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapFlink, Namespace: nameFlink}, flinkCM)).To(Succeed())
+		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("jobmanager.rpc.address: flink-jobmanager.flink.svc"))
+		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.numberOfTaskSlots: 2"))
+		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.rpc.port: 6122"))
+		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.data.port: 6121"))
+		Expect(deploy.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket.Port.IntVal).To(Equal(flinkTMRpcPort))
+
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, svc)).To(Succeed())
 		cfg := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())
@@ -235,6 +261,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(updated.Status.MinioEndpoint).To(Equal("http://minio.minio.svc:9000"))
 		Expect(updated.Status.LakekeeperEndpoint).To(Equal("http://lakekeeper.lakekeeper.svc:8181"))
 		Expect(updated.Status.TrinoEndpoint).To(Equal("http://trino.trino.svc:8080"))
+		Expect(updated.Status.FlinkEndpoint).To(Equal("http://flink-jobmanager.flink.svc:8081"))
 		Expect(updated.Status.KeycloakEndpoint).To(Equal("http://keycloak.keycloak.svc:8080"))
 		Expect(updated.Status.OpenFGAEndpoint).To(Equal("http://openfga.openfga.svc:8081"))
 	})

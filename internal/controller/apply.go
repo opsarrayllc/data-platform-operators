@@ -49,6 +49,9 @@ const (
 	componentLakekeeper       = "lakekeeper"
 	componentTrinoCoordinator = "trino-coordinator"
 	componentTrinoWorker      = "trino-worker"
+	componentFlinkJobManager  = "flink-jobmanager"
+	componentFlinkTaskManager = "flink-taskmanager"
+	componentFlinkOAuth2Proxy = "flink-oauth2-proxy"
 	componentKeycloak         = "keycloak"
 	componentOpenFGA          = "openfga"
 	componentOpenFGAPostgres  = "openfga-postgres"
@@ -59,6 +62,10 @@ const (
 	nameLakekeeper            = "lakekeeper"
 	nameTrino                 = "trino"
 	nameTrinoWorker           = "trino-worker"
+	nameFlink                 = "flink"
+	nameFlinkJobManager       = "flink-jobmanager"
+	nameFlinkTaskManager      = "flink-taskmanager"
+	nameFlinkOAuth2Proxy      = "flink-oauth2-proxy"
 	nameKeycloak              = "keycloak"
 	nameOpenFGA               = "openfga"
 	nameOPA                   = "opa"
@@ -69,6 +76,8 @@ const (
 	secretTrinoCatalog        = "trino-catalog-lakekeeper"
 	secretTrinoConfig         = "trino-config"
 	secretTrinoInternal       = "trino-internal"
+	configMapFlink            = "flink-config"
+	secretFlinkOIDC           = "flink-oidc"
 	secretKeycloakAdmin       = "keycloak-admin"
 	secretOIDC                = "oidc"
 	secretOpenFGA             = "openfga"
@@ -95,6 +104,9 @@ const (
 	keyOIDCOperatorSecret    = "operatorClientSecret"
 	keyOIDCOpaClientID       = "opaClientID"
 	keyOIDCOpaClientSecret   = "opaClientSecret"
+	keyOIDCFlinkClientID     = "flinkClientID"
+	keyOIDCFlinkClientSecret = "flinkClientSecret"
+	keyOAuth2ProxyCookie     = "cookieSecret"
 	keyKeycloakAdminUser     = "username"
 	keyKeycloakAdminPassword = "password"
 	keyTrinoSharedSecret     = "sharedSecret"
@@ -118,6 +130,13 @@ const (
 	postgresPort             = int32(5432)
 	lakekeeperPort           = int32(8181)
 	trinoPort                = int32(8080)
+	flinkRPCPort             = int32(6123)
+	flinkBlobPort            = int32(6124)
+	flinkQueryPort           = int32(6125)
+	flinkDataPort            = int32(6121)
+	flinkTMRpcPort           = int32(6122)
+	flinkRESTPort            = int32(8081)
+	oauth2ProxyPort          = int32(4180)
 	keycloakPort             = int32(8080)
 	openfgaGRPCPort          = int32(8081)
 	openfgaHTTPPort          = int32(8080)
@@ -130,6 +149,10 @@ const (
 	gidLakekeeper            = int64(65534)
 	uidTrino                 = int64(1000)
 	gidTrino                 = int64(1000)
+	uidFlink                 = int64(9999)
+	gidFlink                 = int64(9999)
+	uidOauth2Proxy           = int64(65532)
+	gidOauth2Proxy           = int64(65532)
 	uidKeycloak              = int64(1000)
 	gidKeycloak              = int64(1000)
 	uidOpenFGA               = int64(65532)
@@ -149,6 +172,8 @@ func labelsFor(dp *dataplatformv1alpha1.DataPlatform, component string) map[stri
 	switch component {
 	case componentTrinoCoordinator, componentTrinoWorker:
 		name = nameTrino
+	case componentFlinkJobManager, componentFlinkTaskManager, componentFlinkOAuth2Proxy:
+		name = nameFlink
 	case componentOpenFGAPostgres:
 		name = namePostgres
 	}

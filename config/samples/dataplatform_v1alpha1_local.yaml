@@ -4,7 +4,7 @@
 #   make run          # or: make deploy IMG=...
 #   kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
 #
-# Hosts (also printed by kind-up): 127.0.0.1 keycloak.data-platform.local lakekeeper.data-platform.local trino.data-platform.local
+# Hosts (also printed by kind-up): 127.0.0.1 keycloak.data-platform.local lakekeeper.data-platform.local trino.data-platform.local flink.data-platform.local
 # Login user admin; password is in secret keycloak/keycloak-admin.
 # DBeaver against Trino: docs/dbeaver.md (OAuth2 + mkcert trust; not username/password).
 apiVersion: dataplatform.opsarray.io/v1alpha1
@@ -43,5 +43,17 @@ spec:
     namespace: trino
     publicURL: https://trino.data-platform.local
     workers: 0
+    service:
+      type: ClusterIP
+  flink:
+    enabled: true
+    namespace: flink
+    publicURL: https://flink.data-platform.local
+    taskManagers: 1
+    taskSlots: 2
+    jobManager:
+      processMemory: 1g
+    taskManager:
+      processMemory: 1g
     service:
       type: ClusterIP
