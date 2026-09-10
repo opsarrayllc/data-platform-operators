@@ -123,6 +123,14 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 	if err != nil {
 		return oidcConfig{}, err
 	}
+	flinkID, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCFlinkClientID)
+	if err != nil {
+		return oidcConfig{}, err
+	}
+	flinkSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCFlinkClientSecret)
+	if err != nil {
+		return oidcConfig{}, err
+	}
 
 	return oidcConfig{
 		enabled:          true,
@@ -135,6 +143,8 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 		trinoSecret:      trinoSecret,
 		opaClientID:      opaID,
 		opaSecret:        opaSecret,
+		flinkClientID:    flinkID,
+		flinkSecret:      flinkSecret,
 		operatorClientID: operatorID,
 		operatorSecret:   operatorSecret,
 		adminSubject:     dataplatformv1alpha1.DefaultOIDCAdminUserID,
@@ -242,6 +252,10 @@ func (r *DataPlatformReconciler) ensureKeycloakSecrets(ctx context.Context, dp *
 		if genErr != nil {
 			return genErr
 		}
+		flinkSecret, genErr := randomHex(16)
+		if genErr != nil {
+			return genErr
+		}
 		return r.ensureGeneratedSecret(ctx, dp, secretOIDC, ns, componentKeycloak, map[string][]byte{
 			keyOIDCClientID:          []byte(dataplatformv1alpha1.DefaultOIDCClientID),
 			keyOIDCTrinoClientID:     []byte(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
@@ -250,6 +264,8 @@ func (r *DataPlatformReconciler) ensureKeycloakSecrets(ctx context.Context, dp *
 			keyOIDCOperatorSecret:    []byte(operatorSecret),
 			keyOIDCOpaClientID:       []byte(dataplatformv1alpha1.DefaultOIDCOpaClientID),
 			keyOIDCOpaClientSecret:   []byte(opaSecret),
+			keyOIDCFlinkClientID:     []byte(dataplatformv1alpha1.DefaultOIDCFlinkClientID),
+			keyOIDCFlinkClientSecret: []byte(flinkSecret),
 		})
 	}
 	if err != nil {
@@ -273,6 +289,18 @@ func (r *DataPlatformReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc 
 			return err
 		}
 		oidc.Data[keyOIDCOpaClientSecret] = []byte(secret)
+		changed = true
+	}
+	if _, ok := oidc.Data[keyOIDCFlinkClientID]; !ok {
+		oidc.Data[keyOIDCFlinkClientID] = []byte(dataplatformv1alpha1.DefaultOIDCFlinkClientID)
+		changed = true
+	}
+	if _, ok := oidc.Data[keyOIDCFlinkClientSecret]; !ok {
+		secret, err := randomHex(16)
+		if err != nil {
+			return err
+		}
+		oidc.Data[keyOIDCFlinkClientSecret] = []byte(secret)
 		changed = true
 	}
 	if !changed {
@@ -303,6 +331,10 @@ func (r *DataPlatformReconciler) applyKeycloakRealm(
 	if err != nil {
 		return "", err
 	}
+	flinkSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCFlinkClientSecret)
+	if err != nil {
+		return "", err
+	}
 	signingKey, err := r.getSecretData(ctx, secretKeycloakRealmKey, ns, keyRealmPrivateKey)
 	if err != nil {
 		return "", err
@@ -317,11 +349,13 @@ func (r *DataPlatformReconciler) applyKeycloakRealm(
 		trinoSecret:         trinoSecret,
 		operatorSecret:      operatorSecret,
 		opaSecret:           opaSecret,
+		flinkSecret:         flinkSecret,
 		signingKey:          signingKey,
 		signingCertificate:  signingCert,
 		lakekeeperNamespace: dp.Spec.Lakekeeper.NamespaceOrDefault(),
 		lakekeeperPublicURL: dp.Spec.Lakekeeper.PublicURL,
 		trinoPublicURL:      dp.Spec.Trino.PublicURL,
+		flinkPublicURL:      dp.Spec.Flink.PublicURL,
 	})
 	if err != nil {
 		return "", err
@@ -462,11 +496,13 @@ type realmOptions struct {
 	trinoSecret         string
 	operatorSecret      string
 	opaSecret           string
+	flinkSecret         string
 	signingKey          string
 	signingCertificate  string
 	lakekeeperNamespace string
 	lakekeeperPublicURL string
 	trinoPublicURL      string
+	flinkPublicURL      string
 }
 
 func keycloakRealmJSON(opts realmOptions) (string, error) {
@@ -475,8 +511,10 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	trinoSecret := opts.trinoSecret
 	operatorSecret := opts.operatorSecret
 	opaSecret := opts.opaSecret
+	flinkSecret := opts.flinkSecret
 	lakekeeperPublicURL := opts.lakekeeperPublicURL
 	trinoPublicURL := opts.trinoPublicURL
+	flinkPublicURL := opts.flinkPublicURL
 	realm := spec.RealmOrDefault()
 	lkCallback := clusterServiceURL(nameLakekeeper, opts.lakekeeperNamespace, lakekeeperPort) + "/ui/callback"
 	redirects := []string{
@@ -492,6 +530,10 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	trinoRedirects := []string{}
 	if u := strings.TrimRight(trinoPublicURL, "/"); u != "" {
 		trinoRedirects = append(trinoRedirects, u+"/oauth2/callback")
+	}
+	flinkRedirects := []string{}
+	if u := strings.TrimRight(flinkPublicURL, "/"); u != "" {
+		flinkRedirects = append(flinkRedirects, u+"/oauth2/callback")
 	}
 
 	doc := map[string]any{
@@ -531,6 +573,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			},
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCTrinoClientID, "Trino", trinoSecret, trinoRedirects),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOpaClientID, "OPA", opaSecret, nil),
+			confidentialClient(dataplatformv1alpha1.DefaultOIDCFlinkClientID, "Flink", flinkSecret, flinkRedirects),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOperatorClient, "Data Platform Operator", operatorSecret, nil),
 		},
 		"users": []map[string]any{
@@ -550,6 +593,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			},
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOpaClientID),
+			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCFlinkClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOperatorClient),
 		},
 	}

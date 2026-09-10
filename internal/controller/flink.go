@@ -18,6 +18,8 @@ package controller
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"maps"
 	"slices"
@@ -37,7 +39,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileFlinkStack(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, _ oidcConfig) (bool, error) {
+func (r *DataPlatformReconciler) reconcileFlinkStack(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) (bool, error) {
 	if !dp.Spec.Flink.IsEnabled() {
 		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionTrue, reasonDisabled, "Flink is disabled")
 		return false, nil
@@ -47,18 +49,19 @@ func (r *DataPlatformReconciler) reconcileFlinkStack(ctx context.Context, dp *da
 	if err := r.ensureNamespace(ctx, dp, ns, componentFlinkJobManager); err != nil {
 		return false, err
 	}
-	if err := r.reconcileFlink(ctx, dp); err != nil {
+	if err := r.reconcileFlink(ctx, dp, oidc); err != nil {
 		return false, err
 	}
 	return !conditionTrue(dp, dataplatformv1alpha1.ConditionFlinkReady), nil
 }
 
-func (r *DataPlatformReconciler) reconcileFlink(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) error {
+func (r *DataPlatformReconciler) reconcileFlink(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) error {
 	ns := dp.Spec.Flink.NamespaceOrDefault()
 	dp.Status.FlinkEndpoint = clusterServiceURL(nameFlinkJobManager, ns, flinkRESTPort)
 
 	conf := flinkConfiguration(dp)
 	cfgHash := hashData(conf)
+	uiAuth := flinkUIAuthEnabled(oidc, dp.Spec.Flink.PublicURL)
 
 	if err := r.applyFlinkConfigMap(ctx, dp, ns, conf); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -68,15 +71,15 @@ func (r *DataPlatformReconciler) reconcileFlink(ctx context.Context, dp *datapla
 		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applyFlinkUIService(ctx, dp, ns); err != nil {
-		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
-		return err
-	}
 	if err := r.applyFlinkJobManager(ctx, dp, ns, cfgHash); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
 	if err := r.reconcileFlinkTaskManagers(ctx, dp, ns, cfgHash); err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
+	if err := r.reconcileFlinkUIAuth(ctx, dp, ns, oidc, uiAuth); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -103,8 +106,24 @@ func (r *DataPlatformReconciler) reconcileFlink(ctx context.Context, dp *datapla
 		}
 	}
 
+	if uiAuth {
+		proxyReady, err := r.deploymentReady(ctx, ns, nameFlinkOAuth2Proxy)
+		if err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+		if !proxyReady {
+			setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionFalse, reasonNotReady, "Flink oauth2-proxy is not ready")
+			return nil
+		}
+	}
+
 	setCondition(dp, dataplatformv1alpha1.ConditionFlinkReady, metav1.ConditionTrue, reasonReady, "Flink session cluster is ready")
 	return nil
+}
+
+func flinkUIAuthEnabled(oidc oidcConfig, publicURL string) bool {
+	return oidc.enabled && strings.TrimRight(publicURL, "/") != ""
 }
 
 func flinkConfiguration(dp *dataplatformv1alpha1.DataPlatform) string {
@@ -180,13 +199,226 @@ func (r *DataPlatformReconciler) applyFlinkJobManagerService(
 	})
 }
 
+func (r *DataPlatformReconciler) reconcileFlinkUIAuth(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataPlatform,
+	ns string,
+	oidc oidcConfig,
+	uiAuth bool,
+) error {
+	if !uiAuth {
+		if err := r.deleteFlinkOAuth2Proxy(ctx, ns); err != nil {
+			return err
+		}
+		return r.applyFlinkUIService(ctx, dp, ns, false)
+	}
+	if err := r.ensureFlinkOIDCSecret(ctx, dp, ns, oidc); err != nil {
+		return err
+	}
+	if err := r.applyFlinkOAuth2Proxy(ctx, dp, ns, oidc); err != nil {
+		return err
+	}
+	return r.applyFlinkUIService(ctx, dp, ns, true)
+}
+
+func (r *DataPlatformReconciler) deleteFlinkOAuth2Proxy(ctx context.Context, ns string) error {
+	log := logf.FromContext(ctx)
+	for _, name := range []string{nameFlinkOAuth2Proxy, secretFlinkOIDC} {
+		var obj client.Object
+		if name == secretFlinkOIDC {
+			obj = &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		} else {
+			obj = &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: ns}}
+		}
+		if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, obj); err != nil {
+			if errors.IsNotFound(err) {
+				continue
+			}
+			return err
+		}
+		log.Info("Deleting Flink oauth2-proxy resource", "name", name)
+		if err := client.IgnoreNotFound(r.Delete(ctx, obj)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *DataPlatformReconciler) ensureFlinkOIDCSecret(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataPlatform,
+	ns string,
+	oidc oidcConfig,
+) error {
+	secret := &corev1.Secret{}
+	key := types.NamespacedName{Name: secretFlinkOIDC, Namespace: ns}
+	err := r.Get(ctx, key, secret)
+	if err == nil {
+		changed := false
+		if secret.Data == nil {
+			secret.Data = map[string][]byte{}
+		}
+		if string(secret.Data[keyOIDCFlinkClientID]) != oidc.flinkClientID {
+			secret.Data[keyOIDCFlinkClientID] = []byte(oidc.flinkClientID)
+			changed = true
+		}
+		if string(secret.Data[keyOIDCFlinkClientSecret]) != oidc.flinkSecret {
+			secret.Data[keyOIDCFlinkClientSecret] = []byte(oidc.flinkSecret)
+			changed = true
+		}
+		if len(secret.Data[keyOAuth2ProxyCookie]) == 0 {
+			cookie, genErr := randomCookieSecret()
+			if genErr != nil {
+				return genErr
+			}
+			secret.Data[keyOAuth2ProxyCookie] = []byte(cookie)
+			changed = true
+		}
+		if !changed {
+			return nil
+		}
+		return r.Update(ctx, secret)
+	}
+	if !errors.IsNotFound(err) {
+		return err
+	}
+	cookie, err := randomCookieSecret()
+	if err != nil {
+		return err
+	}
+	return r.ensureGeneratedSecret(ctx, dp, secretFlinkOIDC, ns, componentFlinkOAuth2Proxy, map[string][]byte{
+		keyOIDCFlinkClientID:     []byte(oidc.flinkClientID),
+		keyOIDCFlinkClientSecret: []byte(oidc.flinkSecret),
+		keyOAuth2ProxyCookie:     []byte(cookie),
+	})
+}
+
+func randomCookieSecret() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return base64.URLEncoding.EncodeToString(buf), nil
+}
+
+func (r *DataPlatformReconciler) applyFlinkOAuth2Proxy(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataPlatform,
+	ns string,
+	oidc oidcConfig,
+) error {
+	publicURL := strings.TrimRight(dp.Spec.Flink.PublicURL, "/")
+	issuer := oidc.issuer
+	if oidc.publicIssuer != "" {
+		issuer = oidc.publicIssuer
+	}
+	upstream := clusterServiceURL(nameFlinkJobManager, ns, flinkRESTPort)
+	args := []string{
+		"--http-address=0.0.0.0:" + strconv.Itoa(int(oauth2ProxyPort)),
+		"--upstream=" + upstream,
+		"--provider=oidc",
+		"--oidc-issuer-url=" + issuer,
+		"--redirect-url=" + publicURL + "/oauth2/callback",
+		"--email-domain=*",
+		"--cookie-secure=true",
+		"--cookie-samesite=lax",
+		"--skip-provider-button=true",
+		"--code-challenge-method=S256",
+		"--scope=openid email profile",
+		"--reverse-proxy=true",
+	}
+	// Browser hits the public issuer; pods redeem tokens and fetch JWKS in-cluster.
+	if oidc.publicIssuer != "" && oidc.publicIssuer != oidc.issuer {
+		args = append(args,
+			"--skip-oidc-discovery=true",
+			"--login-url="+oidcAuthURL(oidc.publicIssuer),
+			"--redeem-url="+oidcTokenURL(oidc.issuer),
+			"--oidc-jwks-url="+oidcJWKSURL(oidc.issuer),
+		)
+	}
+
+	cfgHash := hashData(strings.Join(args, "\n"), oidc.flinkClientID, publicURL, upstream)
+	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameFlinkOAuth2Proxy, Namespace: ns}}
+	labels := labelsFor(dp, componentFlinkOAuth2Proxy)
+	return r.apply(ctx, dp, deploy, func() error {
+		ensureLabels(deploy, labels)
+		if deploy.CreationTimestamp.IsZero() {
+			deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
+		}
+		deploy.Spec.Replicas = ptr.To(int32(1))
+		if deploy.Spec.Template.Annotations == nil {
+			deploy.Spec.Template.Annotations = map[string]string{}
+		}
+		deploy.Spec.Template.Annotations[annotationConfigHash] = cfgHash
+		deploy.Spec.Template.Labels = labels
+		deploy.Spec.Template.Spec = corev1.PodSpec{
+			SecurityContext: restrictedPodSecurity(uidOauth2Proxy, gidOauth2Proxy),
+			Containers: []corev1.Container{{
+				Name:  nameFlinkOAuth2Proxy,
+				Image: dp.Spec.Flink.OAuth2ProxyImageOrDefault(),
+				Args:  args,
+				Ports: []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: oauth2ProxyPort}},
+				Env: []corev1.EnvVar{
+					{
+						Name: "OAUTH2_PROXY_CLIENT_ID",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: secretFlinkOIDC},
+								Key:                  keyOIDCFlinkClientID,
+							},
+						},
+					},
+					{
+						Name: "OAUTH2_PROXY_CLIENT_SECRET",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: secretFlinkOIDC},
+								Key:                  keyOIDCFlinkClientSecret,
+							},
+						},
+					},
+					{
+						Name: "OAUTH2_PROXY_COOKIE_SECRET",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: &corev1.SecretKeySelector{
+								LocalObjectReference: corev1.LocalObjectReference{Name: secretFlinkOIDC},
+								Key:                  keyOAuth2ProxyCookie,
+							},
+						},
+					},
+				},
+				ReadinessProbe: &corev1.Probe{
+					ProbeHandler: corev1.ProbeHandler{
+						HTTPGet: &corev1.HTTPGetAction{
+							Path: "/ping",
+							Port: intstr.FromInt32(oauth2ProxyPort),
+						},
+					},
+					PeriodSeconds: 10,
+				},
+				SecurityContext: restrictedContainerSecurity(uidOauth2Proxy, gidOauth2Proxy),
+			}},
+		}
+		return nil
+	})
+}
+
 func (r *DataPlatformReconciler) applyFlinkUIService(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataPlatform,
 	ns string,
+	uiAuth bool,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameFlink, Namespace: ns}}
-	labels := labelsFor(dp, componentFlinkJobManager)
+	var labels map[string]string
+	var targetPort int32
+	if uiAuth {
+		labels = labelsFor(dp, componentFlinkOAuth2Proxy)
+		targetPort = oauth2ProxyPort
+	} else {
+		labels = labelsFor(dp, componentFlinkJobManager)
+		targetPort = flinkRESTPort
+	}
 	return r.apply(ctx, dp, svc, func() error {
 		ensureLabels(svc, labels)
 		svc.Spec.Type = corev1.ServiceTypeClusterIP
@@ -194,7 +426,7 @@ func (r *DataPlatformReconciler) applyFlinkUIService(
 		svc.Spec.Ports = []corev1.ServicePort{{
 			Name:       portNameHTTP,
 			Port:       flinkRESTPort,
-			TargetPort: intstr.FromInt32(flinkRESTPort),
+			TargetPort: intstr.FromInt32(targetPort),
 		}}
 		return nil
 	})

@@ -21,6 +21,7 @@ func TestRealmPinsSigningKey(t *testing.T) {
 		trinoSecret:         "trinosecret",
 		operatorSecret:      "operatorsecret",
 		opaSecret:           "opasecret",
+		flinkSecret:         "flinksecret",
 		signingKey:          key,
 		signingCertificate:  cert,
 		lakekeeperNamespace: "lakekeeper",
