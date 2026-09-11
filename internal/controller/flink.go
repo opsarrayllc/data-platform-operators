@@ -131,14 +131,14 @@ func flinkConfiguration(dp *dataplatformv1alpha1.DataPlatform) string {
 	props := map[string]string{
 		"jobmanager.rpc.address":           fmt.Sprintf("%s.%s.svc", nameFlinkJobManager, ns),
 		"jobmanager.rpc.port":              strconv.Itoa(int(flinkRPCPort)),
-		"jobmanager.bind-host":             "0.0.0.0",
+		"jobmanager.bind-host":             bindAllAddress,
 		"jobmanager.memory.process.size":   dp.Spec.Flink.JobManager.ProcessMemoryOrDefault(),
-		"taskmanager.bind-host":            "0.0.0.0",
+		"taskmanager.bind-host":            bindAllAddress,
 		"taskmanager.rpc.port":             strconv.Itoa(int(flinkTMRpcPort)),
 		"taskmanager.data.port":            strconv.Itoa(int(flinkDataPort)),
 		"taskmanager.memory.process.size":  dp.Spec.Flink.TaskManager.ProcessMemoryOrDefault(),
 		"taskmanager.numberOfTaskSlots":    strconv.Itoa(int(dp.Spec.Flink.TaskSlotsOrDefault())),
-		"rest.bind-address":                "0.0.0.0",
+		"rest.bind-address":                bindAllAddress,
 		"rest.port":                        strconv.Itoa(int(flinkRESTPort)),
 		"blob.server.port":                 strconv.Itoa(int(flinkBlobPort)),
 		"query.server.port":                strconv.Itoa(int(flinkQueryPort)),
@@ -191,7 +191,7 @@ func (r *DataPlatformReconciler) applyFlinkJobManagerService(
 		svc.Spec.Type = dp.Spec.Flink.Service.TypeOrDefault()
 		svc.Spec.Selector = labels
 		svc.Spec.Ports = []corev1.ServicePort{
-			{Name: "rpc", Port: flinkRPCPort, TargetPort: intstr.FromInt32(flinkRPCPort)},
+			{Name: portNameRPC, Port: flinkRPCPort, TargetPort: intstr.FromInt32(flinkRPCPort)},
 			{Name: "blob", Port: flinkBlobPort, TargetPort: intstr.FromInt32(flinkBlobPort)},
 			{Name: portNameHTTP, Port: flinkRESTPort, TargetPort: intstr.FromInt32(flinkRESTPort)},
 		}
@@ -456,7 +456,7 @@ func (r *DataPlatformReconciler) applyFlinkJobManager(
 			dp.Spec.Flink.JobManager.Resources,
 			dp.Spec.Flink.ExtraEnv,
 			[]corev1.ContainerPort{
-				{Name: "rpc", ContainerPort: flinkRPCPort},
+				{Name: portNameRPC, ContainerPort: flinkRPCPort},
 				{Name: "blob", ContainerPort: flinkBlobPort},
 				{Name: portNameHTTP, ContainerPort: flinkRESTPort},
 			},
@@ -505,7 +505,7 @@ func (r *DataPlatformReconciler) reconcileFlinkTaskManagers(
 			dp.Spec.Flink.ExtraEnv,
 			[]corev1.ContainerPort{
 				{Name: "data", ContainerPort: flinkDataPort},
-				{Name: "rpc", ContainerPort: flinkTMRpcPort},
+				{Name: portNameRPC, ContainerPort: flinkTMRpcPort},
 				{Name: "query", ContainerPort: flinkQueryPort},
 			},
 			false,

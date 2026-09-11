@@ -6,6 +6,9 @@
 !**/*.go
 **/*_test.go
 
+# OPA policies compiled into the manager via //go:embed
+!**/*.rego
+
 # Re-include Go module files
 !go.mod
 !go.sum

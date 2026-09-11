@@ -113,6 +113,8 @@ const (
 	keyOpenFGAAPIKey         = "apiKey"
 	keyRealmJSON             = "realm.json"
 	portNameHTTP             = "http"
+	portNameRPC              = "rpc"
+	bindAllAddress           = "0.0.0.0"
 	sslModeDisable           = "disable"
 	volumeData               = "data"
 	volumeTmp                = "tmp"
