@@ -26,7 +26,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileWarehouse(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, store objectStore, oidc oidcConfig) error {
+func (r *DataPlatformReconciler) reconcileWarehouse(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
 	log := logf.FromContext(ctx)
 	if r.Catalog == nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonMissing, "Catalog client is not configured")
@@ -74,6 +74,10 @@ func (r *DataPlatformReconciler) reconcileWarehouse(ctx context.Context, dp *dat
 		return err
 	}
 	log.Info("Ensured LakeKeeper warehouse", "name", req.Name)
+	if err := r.reconcileAccessGroups(ctx, dp, oidc, fga); err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
 	setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionTrue, reasonReady, "Warehouse "+req.Name+" is ready")
 	return nil
 }
@@ -90,8 +94,8 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) [
 		Name:            oidc.adminName,
 		Email:           oidc.adminEmail,
 		Type:            "human",
-		ServerRelation:  "admin",
-		ProjectRelation: "project_admin",
+		ServerRelation:  catalogRelationAdmin,
+		ProjectRelation: catalogRelationProjectAdmin,
 	}}
 	// Trino's Iceberg REST connector uses client-credentials as this
 	// application. Without a project grant LakeKeeper hides warehouses and
@@ -101,7 +105,7 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) [
 			Subject:         oidcSubjectPrefix + oidc.trinoSubject,
 			Name:            oidc.trinoClientID,
 			Type:            "application",
-			ProjectRelation: "project_admin",
+			ProjectRelation: catalogRelationProjectAdmin,
 		})
 	}
 	// The OPA bridge asks LakeKeeper whether other users may act, which is a
@@ -111,7 +115,7 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) [
 			Subject:         oidcSubjectPrefix + oidc.opaSubject,
 			Name:            oidc.opaClientID,
 			Type:            "application",
-			ProjectRelation: "security_admin",
+			ProjectRelation: catalogRelationSecurityAdmin,
 		})
 	}
 	return principals

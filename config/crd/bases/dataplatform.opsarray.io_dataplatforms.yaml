@@ -72,8 +72,11 @@ spec:
                       Defaults to true.
                     type: boolean
                   keycloak:
-                    description: keycloak configures the operator-managed Keycloak
-                      instance.
+                    description: |-
+                      keycloak configures the operator-managed Keycloak instance.
+                      The imported realm includes groups platform-admins, data-engineers, and
+                      analysts. Add a user to a group to grant the matching LakeKeeper role on
+                      the default warehouse.
                     properties:
                       image:
                         description: image is the Keycloak container image.

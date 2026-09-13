@@ -97,6 +97,16 @@ const (
 	// admin, which makes the OIDC subject predictable. The operator needs to know
 	// it up front to grant that user LakeKeeper's admin role after bootstrap.
 	DefaultOIDCAdminUserID = "00000000-0000-4000-8000-000000000001"
+
+	// DefaultGroupPlatformAdmins is the Keycloak group (and matching LakeKeeper
+	// role) for catalog administrators.
+	DefaultGroupPlatformAdmins = "platform-admins"
+	// DefaultGroupDataEngineers is the Keycloak group for users who create and
+	// modify tables in the default warehouse.
+	DefaultGroupDataEngineers = "data-engineers"
+	// DefaultGroupAnalysts is the Keycloak group for users who read the default
+	// warehouse.
+	DefaultGroupAnalysts = "analysts"
 )
 
 // DataPlatformSpec defines the desired state of DataPlatform.
@@ -145,6 +155,9 @@ type AuthSpec struct {
 	Embedded *bool `json:"embedded,omitempty"`
 
 	// keycloak configures the operator-managed Keycloak instance.
+	// The imported realm includes groups platform-admins, data-engineers, and
+	// analysts. Add a user to a group to grant the matching LakeKeeper role on
+	// the default warehouse.
 	// +optional
 	Keycloak KeycloakSpec `json:"keycloak"`
 
@@ -154,6 +167,10 @@ type AuthSpec struct {
 }
 
 // KeycloakSpec configures operator-managed Keycloak.
+// The imported realm includes groups platform-admins, data-engineers, and
+// analysts. Add a user to a group to grant the matching LakeKeeper role on
+// the default warehouse (full admin, create/modify, or read). Group membership
+// is synced on reconcile.
 type KeycloakSpec struct {
 	// namespace defaults to "keycloak". Use a unique value if you create multiple DataPlatforms.
 	// +optional

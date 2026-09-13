@@ -45,7 +45,10 @@ type CatalogClient interface {
 	Bootstrap(ctx context.Context, namespace, service string, port int32, bearer string) error
 	EnsureGrants(ctx context.Context, namespace, service string, port int32, bearer string, principals []CatalogPrincipal) error
 	EnsureWarehouse(ctx context.Context, namespace, service string, port int32, bearer string, req WarehouseRequest) error
+	EnsureAccessRoles(ctx context.Context, namespace, service string, port int32, bearer, warehouseName string, roles []CatalogAccessRole) error
 	EnsureAuthzStore(ctx context.Context, namespace, service string, port int32, bearer string, req AuthzStoreRequest) (string, error)
+	EnsureAuthzTuples(ctx context.Context, namespace, service string, port int32, bearer, storeID string, tuples []AuthzTuple) error
+	JSON(ctx context.Context, method, namespace, service string, port int32, path, bearer string, payload any) (int, []byte, error)
 	FormPost(ctx context.Context, namespace, service string, port int32, path string, form url.Values) (int, []byte, error)
 	FetchToken(ctx context.Context, tokenURL string, form url.Values) (int, []byte, error)
 }
@@ -79,6 +82,23 @@ type CatalogPrincipal struct {
 	// ProjectRelation is granted on the default project when set, e.g.
 	// "project_admin". The server admin role does not imply project access.
 	ProjectRelation string
+}
+
+// CatalogAccessRole is a LakeKeeper role plus the grants it should hold.
+type CatalogAccessRole struct {
+	Name               string
+	Description        string
+	ServerRelations    []string
+	ProjectRelations   []string
+	WarehouseRelations []string
+	Members            []CatalogPrincipal
+}
+
+// AuthzTuple is one OpenFGA relationship, as in "user:alice member group:analysts".
+type AuthzTuple struct {
+	User     string
+	Relation string
+	Object   string
 }
 
 // WarehouseRequest is a LakeKeeper create-warehouse payload.
@@ -144,17 +164,8 @@ func (c *proxyCatalogClient) EnsureGrants(
 	principals []CatalogPrincipal,
 ) error {
 	for _, p := range principals {
-		user := map[string]any{
-			"id":               p.Subject,
-			"name":             p.Name,
-			"user-type":        p.Type,
-			"update-if-exists": true,
-		}
-		if p.Email != "" {
-			user["email"] = p.Email
-		}
 		if err := c.post(ctx, namespace, service, port,
-			"management/v1/user", bearer, user, "provision user "+p.Name); err != nil {
+			"management/v1/user", bearer, catalogUserJSON(p), "provision user "+p.Name); err != nil {
 			return err
 		}
 		if p.ServerRelation != "" {
@@ -216,6 +227,236 @@ func (c *proxyCatalogClient) EnsureWarehouse(ctx context.Context, namespace, ser
 		return nil
 	}
 	return fmt.Errorf("create warehouse returned %d: %s", status, truncate(body))
+}
+
+func (c *proxyCatalogClient) JSON(
+	ctx context.Context,
+	method, namespace, service string,
+	port int32,
+	path, bearer string,
+	payload any,
+) (int, []byte, error) {
+	return c.do(ctx, method, namespace, service, port, path, bearer, payload)
+}
+
+// EnsureAccessRoles creates each role if missing and applies its grants and members.
+func (c *proxyCatalogClient) EnsureAccessRoles(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer, warehouseName string,
+	roles []CatalogAccessRole,
+) error {
+	if len(roles) == 0 {
+		return nil
+	}
+	warehouseID, err := c.warehouseID(ctx, namespace, service, port, bearer, warehouseName)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		roleID, err := c.ensureRole(ctx, namespace, service, port, bearer, role)
+		if err != nil {
+			return err
+		}
+		if err := c.grantRoleAccess(ctx, namespace, service, port, bearer, roleID, warehouseID, role); err != nil {
+			return err
+		}
+		for _, member := range role.Members {
+			if err := c.post(ctx, namespace, service, port,
+				"management/v1/user", bearer, catalogUserJSON(member), "provision user "+member.Name); err != nil {
+				return err
+			}
+			grant := map[string]any{
+				"writes": []map[string]any{{"type": "assignee", "user": member.Subject}},
+			}
+			if err := c.post(ctx, namespace, service, port,
+				"management/v1/permissions/role/"+roleID+"/assignments", bearer, grant,
+				"assign "+member.Name+" to role "+role.Name); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func catalogUserJSON(p CatalogPrincipal) map[string]any {
+	user := map[string]any{
+		"id":               p.Subject,
+		"name":             p.Name,
+		"user-type":        p.Type,
+		"update-if-exists": true,
+	}
+	if p.Email != "" {
+		user["email"] = p.Email
+	}
+	return user
+}
+
+func (c *proxyCatalogClient) ensureRole(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer string,
+	role CatalogAccessRole,
+) (string, error) {
+	if id, err := c.findRoleID(ctx, namespace, service, port, bearer, role.Name); err != nil {
+		return "", err
+	} else if id != "" {
+		return id, nil
+	}
+	payload := map[string]any{"name": role.Name}
+	if role.Description != "" {
+		payload["description"] = role.Description
+	}
+	status, body, err := c.do(ctx, http.MethodPost, namespace, service, port, "management/v1/role", bearer, payload)
+	if err != nil {
+		return "", err
+	}
+	if isSuccess(status) {
+		id := parseRoleID(body)
+		if id == "" {
+			return "", fmt.Errorf("created role %q has no id", role.Name)
+		}
+		return id, nil
+	}
+	if isAlreadyDone(status, body) {
+		id, err := c.findRoleID(ctx, namespace, service, port, bearer, role.Name)
+		if err != nil {
+			return "", err
+		}
+		if id == "" {
+			return "", fmt.Errorf("role %q already exists but was not listed", role.Name)
+		}
+		return id, nil
+	}
+	return "", fmt.Errorf("create role %q returned %d: %s", role.Name, status, truncate(body))
+}
+
+func (c *proxyCatalogClient) findRoleID(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer, name string,
+) (string, error) {
+	status, body, err := c.do(ctx, http.MethodGet, namespace, service, port, "management/v1/role?pageSize=100", bearer, nil)
+	if err != nil {
+		return "", err
+	}
+	if !isSuccess(status) {
+		return "", fmt.Errorf("list roles returned %d: %s", status, truncate(body))
+	}
+	var parsed struct {
+		Roles []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"roles"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", fmt.Errorf("parse role list: %w", err)
+	}
+	for _, role := range parsed.Roles {
+		if role.Name == name {
+			return role.ID, nil
+		}
+	}
+	return "", nil
+}
+
+func parseRoleID(body []byte) string {
+	var parsed struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(body, &parsed) != nil {
+		return ""
+	}
+	return parsed.ID
+}
+
+func (c *proxyCatalogClient) grantRoleAccess(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer, roleID, warehouseID string,
+	role CatalogAccessRole,
+) error {
+	for _, relation := range role.ServerRelations {
+		grant := map[string]any{
+			"writes": []map[string]any{{"type": relation, "role": roleID}},
+		}
+		if err := c.post(ctx, namespace, service, port,
+			"management/v1/permissions/server/assignments", bearer, grant,
+			"grant server "+relation+" to role "+role.Name); err != nil {
+			return err
+		}
+	}
+	for _, relation := range role.ProjectRelations {
+		grant := map[string]any{
+			"writes": []map[string]any{{"type": relation, "role": roleID}},
+		}
+		if err := c.post(ctx, namespace, service, port,
+			"management/v1/permissions/project/assignments", bearer, grant,
+			"grant project "+relation+" to role "+role.Name); err != nil {
+			return err
+		}
+	}
+	if warehouseID == "" {
+		return nil
+	}
+	for _, relation := range role.WarehouseRelations {
+		grant := map[string]any{
+			"writes": []map[string]any{{"type": relation, "role": roleID}},
+		}
+		if err := c.post(ctx, namespace, service, port,
+			"management/v1/permissions/warehouse/"+warehouseID+"/assignments", bearer, grant,
+			"grant warehouse "+relation+" to role "+role.Name); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *proxyCatalogClient) warehouseID(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer, name string,
+) (string, error) {
+	status, body, err := c.do(ctx, http.MethodGet, namespace, service, port, "management/v1/warehouse", bearer, nil)
+	if err != nil {
+		return "", err
+	}
+	if !isSuccess(status) {
+		return "", fmt.Errorf("list warehouses returned %d: %s", status, truncate(body))
+	}
+	id := warehouseIDForName(body, name)
+	if id == "" {
+		return "", fmt.Errorf("warehouse %q was not listed", name)
+	}
+	return id, nil
+}
+
+func warehouseIDForName(body []byte, name string) string {
+	var parsed struct {
+		Warehouses []struct {
+			ID            string `json:"id"`
+			WarehouseID   string `json:"warehouse-id"`
+			Name          string `json:"name"`
+			WarehouseName string `json:"warehouse-name"`
+		} `json:"warehouses"`
+	}
+	if json.Unmarshal(body, &parsed) != nil {
+		return ""
+	}
+	for _, w := range parsed.Warehouses {
+		if w.Name == name || w.WarehouseName == name {
+			if w.ID != "" {
+				return w.ID
+			}
+			return w.WarehouseID
+		}
+	}
+	return ""
 }
 
 func (c *proxyCatalogClient) FormPost(ctx context.Context, namespace, service string, port int32, path string, form url.Values) (int, []byte, error) {

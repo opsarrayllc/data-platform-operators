@@ -120,6 +120,22 @@ To produce a single self-contained manifest for distribution:
 make build-installer IMG=$IMG   # writes dist/install.yaml
 ```
 
+## Users and groups
+
+Embedded Keycloak ships three groups. Create a user in the `dataplatform` realm
+and add them to a group; the operator syncs membership into LakeKeeper (and
+into the row-filter OpenFGA store as `group:<name>#member`):
+
+| Group | Default warehouse access |
+| --- | --- |
+| `platform-admins` | Catalog and project admin (the `admin` user is already in this group) |
+| `data-engineers` | Create and modify tables |
+| `analysts` | Read tables |
+
+Tokens include a `groups` claim. Finer grants (a namespace, a table, a region)
+still go through LakeKeeper's UI or OpenFGA tuples; the groups are the starting
+set of personas, not a replacement for those APIs.
+
 ## Row-level access control
 
 LakeKeeper and OpenFGA authorize whole objects: a warehouse, a namespace, a
@@ -154,10 +170,11 @@ from LakeKeeper's, whose authorization model LakeKeeper migrates itself), points
 Trino at OPA's row-filter and batch-column-mask endpoints, and OPA turns each
 user's grants into a `WHERE region IN (...)` clause or a column mask.
 
-Granting a user a value or a column is deliberately not the operator's job,
-since it owns neither your user list nor your data. Write those tuples against
+Granting a value or a column is still yours: write those tuples against
 the store id in `status.rowFilterStoreID`, using the API key in secret
-`openfga/openfga`:
+`openfga/openfga`. Group membership for the built-in Keycloak groups is
+written by the operator, so `group:analysts#member` works once the user is
+in that group:
 
 ```bash
 STORE=$(kubectl get dataplatform <name> -o jsonpath='{.status.rowFilterStoreID}')
@@ -172,8 +189,10 @@ curl -sS "$OPENFGA/stores/$STORE/write" \
 
 The default column object is `{catalog}.{schema}.{table}.{column}`. Set
 `openfga.object` to a short name such as `ssn` to share one grant across
-tables. Tuple users are Trino usernames (the OIDC `sub` claim), and a
-relation may be granted to a user directly or to a group's members.
+tables. Tuple users are Trino usernames (the OIDC `sub` claim). A relation may be
+granted to a user directly or to a group's members; the operator writes
+membership tuples for the built-in Keycloak groups (`platform-admins`,
+`data-engineers`, `analysts`).
 
 Both features fail closed: a user with no row-filter grant sees no rows, a
 user with no column grant sees the mask, and everyone does if OpenFGA becomes

@@ -29,6 +29,8 @@ spec:
     #     namespace: lakekeeper
   # Identity. Keycloak is deployed by default.
   # Set embedded: false and fill oidc for Okta, JumpCloud, or another IdP.
+  # Embedded Keycloak ships groups platform-admins, data-engineers, and analysts.
+  # Create a user in Keycloak and add them to a group to grant warehouse access.
   auth:
     embedded: true
     keycloak:

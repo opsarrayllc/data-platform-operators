@@ -32,7 +32,12 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-const requeueWhileProgressing = 15 * time.Second
+const (
+	requeueWhileProgressing = 15 * time.Second
+	// requeueAccessSync picks up users added to Keycloak groups after the
+	// platform first became ready.
+	requeueAccessSync = time.Minute
+)
 
 // DataPlatformReconciler reconciles a DataPlatform object.
 type DataPlatformReconciler struct {
@@ -95,6 +100,9 @@ func (r *DataPlatformReconciler) reconcile(ctx context.Context, dp *dataplatform
 	}
 
 	setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionTrue, reasonReady, "All enabled components are ready")
+	if dp.Spec.Auth.IsEnabled() && dp.Spec.Auth.IsEmbedded() {
+		return ctrl.Result{RequeueAfter: requeueAccessSync}, nil
+	}
 	return ctrl.Result{}, nil
 }
 
@@ -154,7 +162,7 @@ func (r *DataPlatformReconciler) reconcileLakekeeperStack(ctx context.Context, d
 	if progressing {
 		return true, store, oidc, fga, nil
 	}
-	if err := r.reconcileWarehouse(ctx, dp, store, oidc); err != nil {
+	if err := r.reconcileWarehouse(ctx, dp, store, oidc, fga); err != nil {
 		return false, store, oidc, fga, err
 	}
 	return !conditionTrue(dp, dataplatformv1alpha1.ConditionWarehouseReady), store, oidc, fga, nil

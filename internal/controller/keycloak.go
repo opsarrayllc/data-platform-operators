@@ -543,10 +543,9 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 		"sslRequired":         "NONE",
 		"accessTokenLifespan": 43200,
 		"roles": map[string]any{
-			"realm": []map[string]any{
-				{"name": "default-roles-" + realm, "composite": true},
-			},
+			"realm": accessRealmRoles(realm),
 		},
+		"groups": accessRealmGroups(),
 		// Keycloak 24+ only puts `sub` on access tokens via the `basic` scope.
 		// Importing a custom clientScopes list replaces the built-in scopes, so
 		// we must ship basic/profile/email ourselves.
@@ -586,6 +585,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 				"email":         keycloakAdminEmail,
 				"firstName":     "Admin",
 				"lastName":      "Local",
+				"groups":        []string{"/" + dataplatformv1alpha1.DefaultGroupPlatformAdmins},
 				"credentials": []map[string]any{{
 					"type":      "password",
 					"value":     adminPass,
@@ -759,6 +759,7 @@ func oidcClientScopes() []map[string]any {
 				userPropertyMapper("username", "preferred_username"),
 				userPropertyMapper("firstName", "given_name"),
 				userPropertyMapper("lastName", "family_name"),
+				groupsMapper(),
 			},
 		},
 		{
@@ -812,4 +813,48 @@ func userPropertyMapper(property, claim string) map[string]any {
 			"userinfo.token.claim": "true",
 		},
 	}
+}
+
+func groupsMapper() map[string]any {
+	return map[string]any{
+		"name":           "groups",
+		"protocol":       "openid-connect",
+		"protocolMapper": "oidc-group-membership-mapper",
+		"config": map[string]string{
+			"full.path":            "false",
+			"id.token.claim":       "true",
+			"access.token.claim":   "true",
+			"userinfo.token.claim": "true",
+			"claim.name":           "groups",
+		},
+	}
+}
+
+func accessRealmRoles(realm string) []map[string]any {
+	groups := defaultAccessGroups()
+	roles := make([]map[string]any, 0, len(groups)+1)
+	roles = append(roles, map[string]any{
+		"name":      "default-roles-" + realm,
+		"composite": true,
+	})
+	for _, group := range groups {
+		roles = append(roles, map[string]any{
+			"name":        group.Name,
+			"description": group.Description,
+		})
+	}
+	return roles
+}
+
+func accessRealmGroups() []map[string]any {
+	groups := make([]map[string]any, 0, len(defaultAccessGroups()))
+	for _, group := range defaultAccessGroups() {
+		groups = append(groups, map[string]any{
+			"id":         keycloakUUID("group", group.Name),
+			"name":       group.Name,
+			"path":       "/" + group.Name,
+			"realmRoles": []string{group.Name},
+		})
+	}
+	return groups
 }

@@ -115,6 +115,41 @@ func (c *proxyCatalogClient) EnsureAuthzStore(
 	return storeID, nil
 }
 
+// EnsureAuthzTuples writes relationship tuples. Existing tuples are treated as
+// success so reconcile can be idempotent.
+func (c *proxyCatalogClient) EnsureAuthzTuples(
+	ctx context.Context,
+	namespace, service string,
+	port int32,
+	bearer, storeID string,
+	tuples []AuthzTuple,
+) error {
+	if storeID == "" || len(tuples) == 0 {
+		return nil
+	}
+	for _, t := range tuples {
+		payload := map[string]any{
+			"writes": map[string]any{
+				"tuple_keys": []map[string]string{{
+					"user":     t.User,
+					"relation": t.Relation,
+					"object":   t.Object,
+				}},
+			},
+		}
+		status, body, err := c.do(ctx, http.MethodPost, namespace, service, port,
+			"stores/"+storeID+"/write", bearer, payload)
+		if err != nil {
+			return err
+		}
+		if isSuccess(status) || isAlreadyDone(status, body) {
+			continue
+		}
+		return fmt.Errorf("write authz tuple %s %s %s returned %d: %s", t.User, t.Relation, t.Object, status, truncate(body))
+	}
+	return nil
+}
+
 func (c *proxyCatalogClient) findAuthzStore(
 	ctx context.Context,
 	namespace, service string,

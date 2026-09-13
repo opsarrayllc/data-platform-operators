@@ -39,7 +39,10 @@ type fakeCatalog struct {
 	bootstraps  int
 	warehouses  []string
 	grants      []string
+	accessRoles []string
 	authzStores []AuthzStoreRequest
+	authzTuples []AuthzTuple
+	jsonBody    []byte
 }
 
 func (f *fakeCatalog) Bootstrap(_ context.Context, _, _ string, _ int32, _ string) error {
@@ -59,9 +62,28 @@ func (f *fakeCatalog) EnsureWarehouse(_ context.Context, _, _ string, _ int32, _
 	return nil
 }
 
+func (f *fakeCatalog) EnsureAccessRoles(_ context.Context, _, _ string, _ int32, _ string, _ string, roles []CatalogAccessRole) error {
+	for _, role := range roles {
+		f.accessRoles = append(f.accessRoles, role.Name)
+	}
+	return nil
+}
+
 func (f *fakeCatalog) EnsureAuthzStore(_ context.Context, _, _ string, _ int32, _ string, req AuthzStoreRequest) (string, error) {
 	f.authzStores = append(f.authzStores, req)
 	return "01ABCDEF", nil
+}
+
+func (f *fakeCatalog) EnsureAuthzTuples(_ context.Context, _, _ string, _ int32, _ string, _ string, tuples []AuthzTuple) error {
+	f.authzTuples = append(f.authzTuples, tuples...)
+	return nil
+}
+
+func (f *fakeCatalog) JSON(_ context.Context, _, _, _ string, _ int32, _ string, _ string, _ any) (int, []byte, error) {
+	if len(f.jsonBody) > 0 {
+		return http.StatusOK, f.jsonBody, nil
+	}
+	return http.StatusOK, []byte("[]"), nil
 }
 
 func (f *fakeCatalog) FormPost(_ context.Context, _, _ string, _ int32, _ string, _ url.Values) (int, []byte, error) {
@@ -137,6 +159,10 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"basic"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"opa"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"flink"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"platform-admins"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"data-engineers"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"analysts"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring("oidc-group-membership-mapper"))
 
 		By("creating the LakeKeeper namespace workloads")
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: nameLakekeeper}, sts)).To(Succeed())
@@ -257,6 +283,9 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(catalog.grants).To(ContainElement("oidc~" + dataplatformv1alpha1.DefaultOIDCAdminUserID + "=admin/project_admin"))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/project_admin")))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/security_admin")))
+		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupPlatformAdmins))
+		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupDataEngineers))
+		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupAnalysts))
 
 		updated := &dataplatformv1alpha1.DataPlatform{}
 		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())

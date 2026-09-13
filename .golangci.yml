@@ -73,6 +73,12 @@ linters:
         path: internal/controller/opa.go
       - linters:
           - goconst
+        path: internal/controller/access.go
+      - linters:
+          - goconst
+        path: internal/controller/authzstore.go
+      - linters:
+          - goconst
         path: .*_test.go
     paths:
       - third_party$
