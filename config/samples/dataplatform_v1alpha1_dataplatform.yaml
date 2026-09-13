@@ -14,6 +14,8 @@ spec:
       # namespace: minio
       # bucket: warehouse
       # storageSize: 20Gi
+      # image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+      # mcImage: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
     # embedded: false
     # s3:
     #   bucket: my-bucket

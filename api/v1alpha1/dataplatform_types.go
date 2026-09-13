@@ -56,8 +56,8 @@ const (
 	DefaultFlinkTaskSlots      = int32(2)
 	DefaultFlinkJMProcessMem   = "1600m"
 	DefaultFlinkTMProcessMem   = "1728m"
-	DefaultMinioImage          = "minio/minio:RELEASE.2025-04-22T22-12-26Z"
-	DefaultMcImage             = "minio/mc:RELEASE.2025-04-16T18-13-26Z"
+	DefaultMinioImage          = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
+	DefaultMcImage             = "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
 	DefaultKeycloakImage       = "quay.io/keycloak/keycloak:26.3.3"
 	DefaultOpenFGAImage        = "openfga/openfga:v1.8.12"
 	DefaultOPAImage            = "openpolicyagent/opa:1.10.1"
