@@ -52,6 +52,9 @@ const (
 	componentFlinkJobManager  = "flink-jobmanager"
 	componentFlinkTaskManager = "flink-taskmanager"
 	componentFlinkOAuth2Proxy = "flink-oauth2-proxy"
+	componentSuperset         = "superset"
+	componentSupersetPostgres = "superset-postgres"
+	componentSupersetRedis    = "superset-redis"
 	componentKeycloak         = "keycloak"
 	componentOpenFGA          = "openfga"
 	componentOpenFGAPostgres  = "openfga-postgres"
@@ -66,6 +69,8 @@ const (
 	nameFlinkJobManager       = "flink-jobmanager"
 	nameFlinkTaskManager      = "flink-taskmanager"
 	nameFlinkOAuth2Proxy      = "flink-oauth2-proxy"
+	nameSuperset              = "superset"
+	nameSupersetRedis         = "superset-redis"
 	nameKeycloak              = "keycloak"
 	nameOpenFGA               = "openfga"
 	nameOPA                   = "opa"
@@ -78,6 +83,9 @@ const (
 	secretTrinoInternal       = "trino-internal"
 	configMapFlink            = "flink-config"
 	secretFlinkOIDC           = "flink-oidc"
+	secretSuperset            = "superset"
+	secretSupersetOIDC        = "superset-oidc"
+	configMapSuperset         = "superset-config"
 	secretKeycloakAdmin       = "keycloak-admin"
 	secretOIDC                = "oidc"
 	secretOpenFGA             = "openfga"
@@ -109,7 +117,10 @@ const (
 	keyOIDCOpaClientSecret       = "opaClientSecret"
 	keyOIDCFlinkClientID         = "flinkClientID"
 	keyOIDCFlinkClientSecret     = "flinkClientSecret"
+	keyOIDCSupersetClientID      = "supersetClientID"
+	keyOIDCSupersetClientSecret  = "supersetClientSecret"
 	keyOAuth2ProxyCookie         = "cookieSecret"
+	keySupersetSecretKey         = "SECRET_KEY"
 	keyKeycloakAdminUser         = "username"
 	keyKeycloakAdminPassword     = "password"
 	keyTrinoSharedSecret         = "sharedSecret"
@@ -143,6 +154,8 @@ const (
 	flinkRESTPort                = int32(8081)
 	oauth2ProxyPort              = int32(4180)
 	keycloakPort                 = int32(8080)
+	supersetPort                 = int32(8088)
+	redisPort                    = int32(6379)
 	openfgaGRPCPort              = int32(8081)
 	openfgaHTTPPort              = int32(8080)
 	opaPort                      = int32(8181)
@@ -158,6 +171,10 @@ const (
 	gidFlink                     = int64(9999)
 	uidOauth2Proxy               = int64(65532)
 	gidOauth2Proxy               = int64(65532)
+	uidSuperset                  = int64(1000)
+	gidSuperset                  = int64(1000)
+	uidRedis                     = int64(999)
+	gidRedis                     = int64(999)
 	uidKeycloak                  = int64(1000)
 	gidKeycloak                  = int64(1000)
 	uidOpenFGA                   = int64(65532)
@@ -179,6 +196,14 @@ func labelsFor(dp *dataplatformv1alpha1.DataPlatform, component string) map[stri
 		name = nameTrino
 	case componentFlinkJobManager, componentFlinkTaskManager, componentFlinkOAuth2Proxy:
 		name = nameFlink
+	case componentSuperset, componentSupersetPostgres, componentSupersetRedis:
+		if component == componentSupersetPostgres {
+			name = namePostgres
+		} else if component == componentSupersetRedis {
+			name = nameSupersetRedis
+		} else {
+			name = nameSuperset
+		}
 	case componentOpenFGAPostgres:
 		name = namePostgres
 	}

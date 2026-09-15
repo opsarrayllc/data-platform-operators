@@ -159,6 +159,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"basic"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"opa"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"flink"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"platform-admins"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"data-engineers"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"analysts"`))
@@ -230,12 +231,27 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.data.port: 6121"))
 		Expect(deploy.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket.Port.IntVal).To(Equal(flinkTMRpcPort))
 
+		By("creating Superset with Keycloak OAuth and a Trino database seed")
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: nameSuperset}, sts)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameSupersetRedis, Namespace: nameSuperset}, deploy)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameSuperset, Namespace: nameSuperset}, deploy)).To(Succeed())
+		Expect(deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(ptr.To(uidSuperset)))
+		supersetCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapSuperset, Namespace: nameSuperset}, supersetCM)).To(Succeed())
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("AUTH_TYPE = AUTH_OAUTH"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DATABASE_OAUTH2_CLIENTS"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"Trino"`))
+		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`database_name=name`))
+
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, svc)).To(Succeed())
 		cfg := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())
 		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("http-server.process-forwarded=true"))
 		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("discovery.uri=http://127.0.0.1:8080"))
-		Expect(string(cfg.Data["config.properties.coordinator"])).NotTo(ContainSubstring("http-server.authentication.type=oauth2"))
+		// Superset is enabled by default, so Trino accepts Bearer tokens even
+		// without a public Trino UI URL.
+		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("http-server.authentication.type=oauth2"))
+		Expect(string(cfg.Data["config.properties.coordinator"])).NotTo(ContainSubstring("web-ui.authentication.type=oauth2"))
 		Expect(string(cfg.Data["config.properties.worker"])).To(ContainSubstring("discovery.uri=http://trino.trino.svc:8080"))
 		Expect(string(cfg.Data["access-control.properties"])).To(ContainSubstring("access-control.name=opa"))
 		Expect(string(cfg.Data["access-control.properties"])).To(ContainSubstring("http://opa.openfga.svc:8181/v1/data/trino/allow"))
@@ -293,6 +309,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(updated.Status.LakekeeperEndpoint).To(Equal("http://lakekeeper.lakekeeper.svc:8181"))
 		Expect(updated.Status.TrinoEndpoint).To(Equal("http://trino.trino.svc:8080"))
 		Expect(updated.Status.FlinkEndpoint).To(Equal("http://flink-jobmanager.flink.svc:8081"))
+		Expect(updated.Status.SupersetEndpoint).To(Equal("http://superset.superset.svc:8088"))
 		Expect(updated.Status.KeycloakEndpoint).To(Equal("http://keycloak.keycloak.svc:8080"))
 		Expect(updated.Status.OpenFGAEndpoint).To(Equal("http://openfga.openfga.svc:8081"))
 	})
@@ -390,6 +407,46 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlink, Namespace: nameFlink}, svc)).To(Succeed())
 		Expect(svc.Spec.Selector[labelAppComponent]).To(Equal(componentFlinkOAuth2Proxy))
 		Expect(svc.Spec.Ports[0].TargetPort.IntVal).To(Equal(oauth2ProxyPort))
+	})
+
+	It("wires Superset Keycloak OAuth and enables Trino OAuth2 without a Trino publicURL", func() {
+		resource := &dataplatformv1alpha1.DataPlatform{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+		resource.Spec.Auth.Keycloak.PublicURL = "https://keycloak.data-platform.local"
+		resource.Spec.Superset.PublicURL = "https://superset.data-platform.local"
+		resource.Spec.Trino.PublicURL = ""
+		Expect(k8sClient.Update(ctx, resource)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		markDeploymentReady(ctx, nameKeycloak, nameKeycloak)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		realmCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapKeycloakRealm, Namespace: nameKeycloak}, realmCM)).To(Succeed())
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring("https://superset.data-platform.local/oauth-authorized/keycloak"))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring("https://superset.data-platform.local/api/v1/database/oauth2/"))
+
+		supersetCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapSuperset, Namespace: nameSuperset}, supersetCM)).To(Succeed())
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("AUTH_TYPE = AUTH_OAUTH"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DATABASE_OAUTH2_CLIENTS"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("https://superset.data-platform.local/api/v1/database/oauth2/"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("platform-admins"))
+
+		cfg := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())
+		coord := string(cfg.Data["config.properties.coordinator"])
+		Expect(coord).To(ContainSubstring("http-server.authentication.type=oauth2"))
+		Expect(coord).NotTo(ContainSubstring("web-ui.authentication.type=oauth2"))
+		Expect(coord).To(ContainSubstring("internal-communication.shared-secret="))
+
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretSupersetOIDC, Namespace: nameSuperset}, &corev1.Secret{})).To(Succeed())
+		updated := &dataplatformv1alpha1.DataPlatform{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+		Expect(updated.Status.SupersetEndpoint).To(Equal("http://superset.superset.svc:8088"))
 	})
 
 	It("uses an external S3 store when embedded is false", func() {

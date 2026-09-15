@@ -132,6 +132,13 @@ run: manifests generate fmt vet ## Run a controller from your host.
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
+SUPERSET_IMG ?= data-platform-superset:5.0.0
+SUPERSET_DOCKERFILE ?= images/superset/Dockerfile
+
+.PHONY: docker-build-superset
+docker-build-superset: ## Build the Superset image with OAuth/Trino extras baked in.
+	$(CONTAINER_TOOL) build -t ${SUPERSET_IMG} -f ${SUPERSET_DOCKERFILE} images/superset
+
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	$(CONTAINER_TOOL) push ${IMG}

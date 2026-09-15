@@ -48,8 +48,8 @@ func (r *DataPlatformReconciler) reconcileTrino(ctx context.Context, dp *datapla
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	coordCfg := trinoConfigProperties(true, dp.Spec.Trino.WorkersOrDefault() == 0, ns, dp.Spec.Trino.ExtraConfig, oidc, dp.Spec.Trino.PublicURL, sharedSecret)
-	workerCfg := trinoConfigProperties(false, false, ns, dp.Spec.Trino.ExtraConfig, oidcConfig{}, "", sharedSecret)
+	coordCfg := trinoConfigProperties(true, dp.Spec.Trino.WorkersOrDefault() == 0, ns, dp.Spec.Trino.ExtraConfig, oidc, dp.Spec.Trino.PublicURL, sharedSecret, dp.Spec.Superset.IsEnabled())
+	workerCfg := trinoConfigProperties(false, false, ns, dp.Spec.Trino.ExtraConfig, oidcConfig{}, "", sharedSecret, false)
 	opaURL := ""
 	if fga.enabled && oidc.enabled {
 		opaURL = fga.opaURL
@@ -91,7 +91,7 @@ func (r *DataPlatformReconciler) reconcileTrino(ctx context.Context, dp *datapla
 	return nil
 }
 
-func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extra map[string]string, oidc oidcConfig, publicURL, sharedSecret string) string {
+func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extra map[string]string, oidc oidcConfig, publicURL, sharedSecret string, supersetEnabled bool) string {
 	discovery := clusterServiceURL(nameTrino, ns, trinoPort)
 	if coordinator {
 		// Announce to the local process. Using the Service DNS sends the
@@ -106,8 +106,10 @@ func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extr
 		"discovery.uri":                      discovery,
 		"node-scheduler.include-coordinator": fmt.Sprintf("%t", includeCoordinator),
 	}
-	if coordinator && trinoUIAuthEnabled(oidc, publicURL) {
-		maps.Copy(props, trinoOAuthProperties(oidc))
+	oauthSQL := trinoOAuthEnabled(oidc, publicURL, supersetEnabled)
+	oauthUI := trinoUIAuthEnabled(oidc, publicURL)
+	if coordinator && oauthSQL {
+		maps.Copy(props, trinoOAuthProperties(oidc, oauthUI))
 	}
 	if sharedSecret != "" {
 		props["internal-communication.shared-secret"] = sharedSecret
@@ -118,6 +120,16 @@ func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extr
 
 func trinoUIAuthEnabled(oidc oidcConfig, publicURL string) bool {
 	return oidc.enabled && strings.TrimRight(publicURL, "/") != ""
+}
+
+// trinoOAuthEnabled turns on coordinator OAuth2 so clients (Web UI and/or
+// Superset) can present Bearer tokens. The Web UI itself is only enabled when
+// publicURL is set; Superset needs the HTTP authenticator even without a public Trino UI.
+func trinoOAuthEnabled(oidc oidcConfig, publicURL string, supersetEnabled bool) bool {
+	if !oidc.enabled {
+		return false
+	}
+	return strings.TrimRight(publicURL, "/") != "" || supersetEnabled
 }
 
 func trinoAccessControlProperties(opaURL string, rowFilters, columnAccess bool) string {
@@ -140,14 +152,13 @@ func trinoAccessControlProperties(opaURL string, rowFilters, columnAccess bool) 
 	return renderProperties(props)
 }
 
-func trinoOAuthProperties(oidc oidcConfig) map[string]string {
+func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 	issuer := oidc.issuer
 	if oidc.publicIssuer != "" {
 		issuer = oidc.publicIssuer
 	}
 	props := map[string]string{
 		"http-server.authentication.type":                        "oauth2",
-		"web-ui.authentication.type":                             "oauth2",
 		"http-server.authentication.allow-insecure-over-http":    "true",
 		"http-server.authentication.oauth2.issuer":               issuer,
 		"http-server.authentication.oauth2.client-id":            oidc.trinoClientID,
@@ -155,6 +166,9 @@ func trinoOAuthProperties(oidc oidcConfig) map[string]string {
 		"http-server.authentication.oauth2.scopes":               "openid",
 		"http-server.authentication.oauth2.principal-field":      "sub",
 		"http-server.authentication.oauth2.additional-audiences": oidc.audience,
+	}
+	if enableWebUI {
+		props["web-ui.authentication.type"] = "oauth2"
 	}
 	if oidc.proxyService != "" && oidc.publicIssuer != "" && oidc.publicIssuer != oidc.issuer {
 		props["http-server.authentication.oauth2.oidc.discovery"] = "false"
@@ -166,7 +180,7 @@ func trinoOAuthProperties(oidc oidcConfig) map[string]string {
 }
 
 func (r *DataPlatformReconciler) trinoSharedSecret(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string, oidc oidcConfig) (string, error) {
-	if !trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL) {
+	if !trinoOAuthEnabled(oidc, dp.Spec.Trino.PublicURL, dp.Spec.Superset.IsEnabled()) {
 		return "", nil
 	}
 	secret, err := randomHex(32)

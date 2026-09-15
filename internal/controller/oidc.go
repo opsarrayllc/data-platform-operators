@@ -41,6 +41,8 @@ type oidcConfig struct {
 	opaSecret        string
 	flinkClientID    string
 	flinkSecret      string
+	supersetClientID string
+	supersetSecret   string
 	operatorClientID string
 	operatorSecret   string
 	// adminSubject is the OIDC subject of the human admin the operator manages,
@@ -141,6 +143,23 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		}
 	}
 
+	supersetID := flinkID
+	supersetSecret := flinkSecret
+	if ref.SupersetClientIDKey != "" {
+		supersetID, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.SupersetClientIDKey)
+		if err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
+			return oidcConfig{}, err
+		}
+	}
+	if ref.SupersetClientSecretKey != "" {
+		supersetSecret, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.SupersetClientSecretKey)
+		if err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
+			return oidcConfig{}, err
+		}
+	}
+
 	issuer := strings.TrimRight(spec.Issuer, "/")
 	return oidcConfig{
 		enabled:          true,
@@ -154,6 +173,8 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		opaSecret:        trinoSecret,
 		flinkClientID:    flinkID,
 		flinkSecret:      flinkSecret,
+		supersetClientID: supersetID,
+		supersetSecret:   supersetSecret,
 		operatorClientID: clientID,
 		operatorSecret:   clientSecret,
 		tokenURL:         spec.TokenEndpointOrDefault(),

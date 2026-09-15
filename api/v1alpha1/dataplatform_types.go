@@ -35,6 +35,8 @@ const (
 	ConditionTrinoReady = "TrinoReady"
 	// ConditionFlinkReady is True when the Flink session cluster is ready.
 	ConditionFlinkReady = "FlinkReady"
+	// ConditionSupersetReady is True when the Superset Deployment is ready.
+	ConditionSupersetReady = "SupersetReady"
 	// ConditionMinioReady is True when in-cluster MinIO is usable, or when using an external store.
 	ConditionMinioReady = "MinioReady"
 	// ConditionAuthReady is True when the identity provider is usable, or when auth is disabled.
@@ -45,23 +47,29 @@ const (
 	DefaultLakekeeperNamespace = "lakekeeper"
 	DefaultTrinoNamespace      = "trino"
 	DefaultFlinkNamespace      = "flink"
+	DefaultSupersetNamespace   = "superset"
 	DefaultMinioNamespace      = "minio"
 	DefaultKeycloakNamespace   = "keycloak"
 	DefaultOpenFGANamespace    = "openfga"
 	DefaultLakekeeperImage     = "quay.io/lakekeeper/catalog:v0.13.3"
 	DefaultTrinoImage          = "trinodb/trino:476"
 	DefaultFlinkImage          = "flink:1.20.5"
-	DefaultPostgresImage       = "postgres:17"
-	DefaultFlinkTaskManagers   = int32(1)
-	DefaultFlinkTaskSlots      = int32(2)
-	DefaultFlinkJMProcessMem   = "1600m"
-	DefaultFlinkTMProcessMem   = "1728m"
-	DefaultMinioImage          = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
-	DefaultMcImage             = "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
-	DefaultKeycloakImage       = "quay.io/keycloak/keycloak:26.3.3"
-	DefaultOpenFGAImage        = "openfga/openfga:v1.8.12"
-	DefaultOPAImage            = "openpolicyagent/opa:1.10.1"
-	DefaultOpenFGAStore        = "lakekeeper"
+	// DefaultSupersetImage is the operator-built image with authlib and the
+	// Trino dialect baked in (see images/superset/Dockerfile). Build/load it
+	// with `make docker-build-superset` (kind-up does this automatically).
+	DefaultSupersetImage     = "data-platform-superset:5.0.0"
+	DefaultRedisImage        = "redis:7.4-alpine"
+	DefaultPostgresImage     = "postgres:17"
+	DefaultFlinkTaskManagers = int32(1)
+	DefaultFlinkTaskSlots    = int32(2)
+	DefaultFlinkJMProcessMem = "1600m"
+	DefaultFlinkTMProcessMem = "1728m"
+	DefaultMinioImage        = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
+	DefaultMcImage           = "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
+	DefaultKeycloakImage     = "quay.io/keycloak/keycloak:26.3.3"
+	DefaultOpenFGAImage      = "openfga/openfga:v1.8.12"
+	DefaultOPAImage          = "openpolicyagent/opa:1.10.1"
+	DefaultOpenFGAStore      = "lakekeeper"
 	// DefaultTrinoCatalog is the Trino catalog the operator points at the
 	// managed LakeKeeper warehouse.
 	DefaultTrinoCatalog = "lakekeeper"
@@ -75,24 +83,25 @@ const (
 	DefaultRowFilterRelation = "viewer"
 	// DefaultColumnMask is the SQL expression Trino applies to a restricted
 	// column when the user has no grant. NULL is valid for every Trino type.
-	DefaultColumnMask         = "NULL"
-	DefaultWarehouseName      = "default"
-	DefaultPostgresStorage    = "10Gi"
-	DefaultMinioStorage       = "20Gi"
-	DefaultMinioBucket        = "warehouse"
-	DefaultS3Flavor           = "aws"
-	DefaultS3CompatFlavor     = "s3-compat"
-	DefaultS3CompatRegion     = "us-east-1"
-	DefaultOIDCRealm          = "dataplatform"
-	DefaultOIDCAudience       = "lakekeeper"
-	DefaultOIDCClientID       = "lakekeeper"
-	DefaultOIDCTrinoClientID  = "trino"
-	DefaultOIDCOpaClientID    = "opa"
-	DefaultOIDCFlinkClientID  = "flink"
-	DefaultOIDCOperatorClient = "operator"
-	DefaultOIDCScope          = "lakekeeper"
-	DefaultOIDCAdminUser      = "admin"
-	DefaultOAuth2ProxyImage   = "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4"
+	DefaultColumnMask           = "NULL"
+	DefaultWarehouseName        = "default"
+	DefaultPostgresStorage      = "10Gi"
+	DefaultMinioStorage         = "20Gi"
+	DefaultMinioBucket          = "warehouse"
+	DefaultS3Flavor             = "aws"
+	DefaultS3CompatFlavor       = "s3-compat"
+	DefaultS3CompatRegion       = "us-east-1"
+	DefaultOIDCRealm            = "dataplatform"
+	DefaultOIDCAudience         = "lakekeeper"
+	DefaultOIDCClientID         = "lakekeeper"
+	DefaultOIDCTrinoClientID    = "trino"
+	DefaultOIDCOpaClientID      = "opa"
+	DefaultOIDCFlinkClientID    = "flink"
+	DefaultOIDCSupersetClientID = "superset"
+	DefaultOIDCOperatorClient   = "operator"
+	DefaultOIDCScope            = "lakekeeper"
+	DefaultOIDCAdminUser        = "admin"
+	DefaultOAuth2ProxyImage     = "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4"
 	// DefaultOIDCAdminUserID is imported as the Keycloak user id for the local
 	// admin, which makes the OIDC subject predictable. The operator needs to know
 	// it up front to grant that user LakeKeeper's admin role after bootstrap.
@@ -137,6 +146,10 @@ type DataPlatformSpec struct {
 	// flink configures a shared Flink session cluster for streaming and CDC jobs.
 	// +optional
 	Flink FlinkSpec `json:"flink"`
+
+	// superset configures Apache Superset for BI against Trino.
+	// +optional
+	Superset SupersetSpec `json:"superset"`
 }
 
 // AuthSpec configures identity for LakeKeeper and Trino.
@@ -144,8 +157,8 @@ type DataPlatformSpec struct {
 // to use an existing provider such as Okta or JumpCloud.
 type AuthSpec struct {
 	// enabled turns on OIDC for LakeKeeper, OpenFGA clients, the Trino Iceberg
-	// catalog, the Trino Web UI when spec.trino.publicURL is set, and the Flink
-	// Web UI when spec.flink.publicURL is set.
+	// catalog, the Trino Web UI when spec.trino.publicURL is set, the Flink
+	// Web UI when spec.flink.publicURL is set, and Superset when it is enabled.
 	// Defaults to true.
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
@@ -259,6 +272,14 @@ type OIDCCredentialsSecretRef struct {
 	// flinkClientSecretKey, if set, uses a separate secret for the Flink Web UI client.
 	// +optional
 	FlinkClientSecretKey string `json:"flinkClientSecretKey,omitempty"`
+
+	// supersetClientIDKey, if set, uses a separate confidential client for Superset.
+	// +optional
+	SupersetClientIDKey string `json:"supersetClientIDKey,omitempty"`
+
+	// supersetClientSecretKey, if set, uses a separate secret for the Superset client.
+	// +optional
+	SupersetClientSecretKey string `json:"supersetClientSecretKey,omitempty"`
 }
 
 // AuthzSpec configures LakeKeeper authorization and the Trino OPA bridge.
@@ -800,6 +821,62 @@ type FlinkTaskManagerSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
+// SupersetSpec configures Apache Superset for BI dashboards against Trino.
+// When auth is enabled, users sign in with Keycloak (AUTH_OAUTH). Queries run
+// through Trino with per-user OAuth2 tokens so existing OPA/LakeKeeper policies
+// (including row filters and column masks) still apply.
+type SupersetSpec struct {
+	// enabled deploys Superset. Defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// namespace is the Kubernetes namespace for Superset (and its Postgres/Redis).
+	// Defaults to "superset". Use a unique value if you create multiple DataPlatforms.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the Superset container image. Defaults to data-platform-superset:5.0.0
+	// (images/superset/Dockerfile), which includes authlib and the Trino dialect.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// publicURL is the Superset URL browsers use (for example https://superset.example.com).
+	// When set and auth is enabled, Keycloak redirect URIs are registered for this origin.
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// postgres is Superset's metadata database.
+	// +optional
+	Postgres PostgresSpec `json:"postgres"`
+
+	// redis configures the in-cluster Redis used for sessions and cache.
+	// +optional
+	Redis SupersetRedisSpec `json:"redis"`
+
+	// resources are compute resource requirements for the Superset container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// extraEnv is appended to the Superset container.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+
+	// service exposes the Superset HTTP port.
+	// +optional
+	Service ServiceSpec `json:"service"`
+}
+
+// SupersetRedisSpec configures Redis for Superset.
+type SupersetRedisSpec struct {
+	// image is the Redis container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// resources are compute resource requirements for the Redis container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
 // ServiceSpec configures a Kubernetes Service.
 type ServiceSpec struct {
 	// type is the Service type.
@@ -822,6 +899,7 @@ type DataPlatformStatus struct {
 	// - "WarehouseReady": the Iceberg warehouse has been created
 	// - "TrinoReady": the Trino coordinator is ready
 	// - "FlinkReady": the Flink session cluster is ready
+	// - "SupersetReady": the Superset Deployment is ready
 	//
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map
@@ -845,6 +923,10 @@ type DataPlatformStatus struct {
 	// +optional
 	FlinkEndpoint string `json:"flinkEndpoint,omitempty"`
 
+	// supersetEndpoint is the in-cluster HTTP URL of Superset.
+	// +optional
+	SupersetEndpoint string `json:"supersetEndpoint,omitempty"`
+
 	// keycloakEndpoint is the in-cluster HTTP URL of Keycloak when it is embedded.
 	// +optional
 	KeycloakEndpoint string `json:"keycloakEndpoint,omitempty"`
@@ -867,6 +949,7 @@ type DataPlatformStatus struct {
 // +kubebuilder:printcolumn:name="Lakekeeper",type=string,JSONPath=".status.lakekeeperEndpoint"
 // +kubebuilder:printcolumn:name="Trino",type=string,JSONPath=".status.trinoEndpoint"
 // +kubebuilder:printcolumn:name="Flink",type=string,JSONPath=".status.flinkEndpoint"
+// +kubebuilder:printcolumn:name="Superset",type=string,JSONPath=".status.supersetEndpoint"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // DataPlatform is the Schema for the dataplatforms API.

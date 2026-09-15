@@ -105,3 +105,23 @@ spec:
     #   parallelism.default: "2"
     service:
       type: ClusterIP
+  # BI dashboards against Trino. Users sign in with Keycloak; SQL runs as the
+  # logged-in user via per-user Trino OAuth2 so OPA/LakeKeeper policies apply.
+  # The first Trino query may prompt a one-time OAuth consent.
+  # When auth.embedded is false, register a confidential "superset" client and
+  # put its credentials in the OIDC Secret (supersetClientID / supersetClientSecret).
+  # image defaults to data-platform-superset:5.0.0 (authlib + Trino dialect).
+  # Build with: make docker-build-superset
+  # For a registry: make docker-build-superset SUPERSET_IMG=ghcr.io/org/superset:5.0.0
+  #   && docker push ... && set spec.superset.image accordingly.
+  # Upstream token forwarding (single login, no second dance) is tracked in
+  # https://github.com/apache/superset/pull/38469.
+  superset:
+    enabled: true
+    # image: data-platform-superset:5.0.0
+    # publicURL: https://superset.example.com
+    postgres:
+      embedded: true
+      # storageSize: 10Gi
+    service:
+      type: ClusterIP

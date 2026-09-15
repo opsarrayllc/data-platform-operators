@@ -136,6 +136,12 @@ Tokens include a `groups` claim. Finer grants (a namespace, a table, a region)
 still go through LakeKeeper's UI or OpenFGA tuples; the groups are the starting
 set of personas, not a replacement for those APIs.
 
+Superset maps the same groups to FAB roles (`platform-admins` → Admin,
+`data-engineers` → Alpha, `analysts` → Gamma). Charts and SQL Lab query Trino
+with a per-user OAuth2 token, so catalog, row-filter, and column-mask policies
+still apply. The first Trino query after login may prompt a one-time Keycloak
+consent; a future Superset release may reuse the login token and skip that step.
+
 ## Row-level access control
 
 LakeKeeper and OpenFGA authorize whole objects: a warehouse, a namespace, a
@@ -218,9 +224,16 @@ make run
 kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
 ```
 
-That brings up Keycloak, LakeKeeper, Trino, and Flink behind mkcert TLS on
-`*.data-platform.local`. To query Trino from DBeaver-CE, see
-[docs/dbeaver.md](docs/dbeaver.md).
+That brings up Keycloak, LakeKeeper, Trino, Flink, and Superset behind mkcert TLS on
+`*.data-platform.local`. Open `https://superset.data-platform.local` and sign in
+with Keycloak (`admin` / password from `keycloak/keycloak-admin`). To query Trino
+from DBeaver-CE, see [docs/dbeaver.md](docs/dbeaver.md).
+
+Superset uses `data-platform-superset:5.0.0`, built from
+[`images/superset/Dockerfile`](images/superset/Dockerfile) (stock Apache Superset
+plus `authlib` and the Trino dialect). `make kind-up` builds and loads it; for
+other clusters run `make docker-build-superset SUPERSET_IMG=...` and push/set
+`spec.superset.image`.
 
 ## Notes
 
