@@ -203,9 +203,9 @@ func (r *DataPlatformReconciler) applyPostgresStatefulSet(
 			Image: spec.ImageOrDefault(),
 			Ports: []corev1.ContainerPort{{Name: namePostgres, ContainerPort: postgresPort}},
 			Env: []corev1.EnvVar{
-				{Name: "POSTGRES_USER", Value: namePostgres},
+				{Name: envPostgresUser, Value: namePostgres},
 				{
-					Name: "POSTGRES_PASSWORD",
+					Name: envPostgresPassword,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
@@ -213,7 +213,7 @@ func (r *DataPlatformReconciler) applyPostgresStatefulSet(
 						},
 					},
 				},
-				{Name: "POSTGRES_DB", Value: spec.DatabaseOrDefault()},
+				{Name: envPostgresDB, Value: spec.DatabaseOrDefault()},
 				{Name: keyPGDATA, Value: pgDataPath},
 			},
 			VolumeMounts: []corev1.VolumeMount{{Name: volumeData, MountPath: pgDataMountPath}},

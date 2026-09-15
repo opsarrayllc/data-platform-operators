@@ -435,6 +435,12 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DATABASE_OAUTH2_CLIENTS"))
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("https://superset.data-platform.local/api/v1/database/oauth2/"))
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("platform-admins"))
+		// Browser authorize URL is public; server-side token/JWKS stay in-cluster.
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"authorize_url": "https://keycloak.data-platform.local/realms/dataplatform/protocol/openid-connect/auth"`))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"access_token_url": "http://keycloak.keycloak.svc:8080/realms/dataplatform/protocol/openid-connect/token"`))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"api_base_url": "http://keycloak.keycloak.svc:8080/realms/dataplatform/protocol/"`))
+		Expect(supersetCM.Data[supersetConfigKey]).NotTo(ContainSubstring("server_metadata_url"))
+		Expect(supersetCM.Data[supersetConfigKey]).NotTo(ContainSubstring(`"access_token_url": "https://keycloak.data-platform.local`))
 
 		cfg := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())

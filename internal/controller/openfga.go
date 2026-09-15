@@ -256,9 +256,9 @@ func (r *DataPlatformReconciler) applyOpenFGAPostgres(
 			Image: spec.ImageOrDefault(),
 			Ports: []corev1.ContainerPort{{Name: namePostgres, ContainerPort: postgresPort}},
 			Env: []corev1.EnvVar{
-				{Name: "POSTGRES_USER", Value: namePostgres},
+				{Name: envPostgresUser, Value: namePostgres},
 				{
-					Name: "POSTGRES_PASSWORD",
+					Name: envPostgresPassword,
 					ValueFrom: &corev1.EnvVarSource{
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
@@ -266,7 +266,7 @@ func (r *DataPlatformReconciler) applyOpenFGAPostgres(
 						},
 					},
 				},
-				{Name: "POSTGRES_DB", Value: "postgres"},
+				{Name: envPostgresDB, Value: "postgres"},
 				{Name: keyPGDATA, Value: pgDataPath},
 			},
 			VolumeMounts: []corev1.VolumeMount{{Name: volumeData, MountPath: pgDataMountPath}},

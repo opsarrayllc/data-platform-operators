@@ -19,7 +19,9 @@ linters:
     - nakedret
     - prealloc
     - revive
-    - staticcheck
+    # staticcheck panics under Go 1.27 (buildir KeyValueExpr in stdlib poll).
+    # Re-enable once honnef.co/go/tools supports this toolchain.
+    # - staticcheck
     - unconvert
     - unparam
     - unused

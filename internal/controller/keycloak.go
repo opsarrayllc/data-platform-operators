@@ -595,10 +595,11 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 		"groups": accessRealmGroups(),
 		// Keycloak 24+ only puts `sub` on access tokens via the `basic` scope.
 		// Importing a custom clientScopes list replaces the built-in scopes, so
-		// we must ship basic/profile/email ourselves.
-		"clientScopes":               oidcClientScopes(),
-		"defaultDefaultClientScopes": defaultOIDCClientScopes(),
-		"components":                 realmKeyComponents(opts.signingKey, opts.signingCertificate),
+		// we must ship basic/profile/email/offline_access ourselves.
+		"clientScopes":                oidcClientScopes(),
+		"defaultDefaultClientScopes":  defaultOIDCClientScopes(),
+		"defaultOptionalClientScopes": []string{"offline_access"},
+		"components":                  realmKeyComponents(opts.signingKey, opts.signingCertificate),
 		"clients": []map[string]any{
 			{
 				"clientId":                  dataplatformv1alpha1.DefaultOIDCClientID,
@@ -612,7 +613,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 				"redirectUris":              redirects,
 				"webOrigins":                []string{"+"},
 				"defaultClientScopes":       defaultOIDCClientScopes(),
-				"optionalClientScopes":      []string{},
+				"optionalClientScopes":      optionalOIDCClientScopes(),
 				"attributes": map[string]string{
 					"oauth2.device.authorization.grant.enabled": "true",
 					"pkce.code.challenge.method":                "S256",
@@ -731,7 +732,7 @@ func confidentialClient(id, name, secret string, redirectURIs []string) map[stri
 		"standardFlowEnabled":       false,
 		"directAccessGrantsEnabled": false,
 		"defaultClientScopes":       defaultOIDCClientScopes(),
-		"optionalClientScopes":      []string{},
+		"optionalClientScopes":      optionalOIDCClientScopes(),
 		"protocolMappers":           mappers,
 	}
 	if len(redirectURIs) > 0 {
@@ -772,6 +773,10 @@ func audienceMapper(clientID string) map[string]any {
 
 func defaultOIDCClientScopes() []string {
 	return []string{"basic", "profile", "email", dataplatformv1alpha1.DefaultOIDCScope}
+}
+
+func optionalOIDCClientScopes() []string {
+	return []string{"offline_access"}
 }
 
 func oidcClientScopes() []map[string]any {
@@ -821,6 +826,17 @@ func oidcClientScopes() []map[string]any {
 			},
 			"protocolMappers": []map[string]any{
 				userPropertyMapper("email", "email"),
+			},
+		},
+		{
+			// Requested by Superset (and Trino DB OAuth) for refresh tokens that
+			// outlive the browser SSO session.
+			"name":        "offline_access",
+			"description": "OpenID Connect built-in scope: offline_access",
+			"protocol":    "openid-connect",
+			"attributes": map[string]string{
+				"include.in.token.scope":    "true",
+				"display.on.consent.screen": "false",
 			},
 		},
 		{

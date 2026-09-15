@@ -184,7 +184,11 @@ func TestRealmAccessGroups(t *testing.T) {
 	}
 
 	foundGroupsClaim := false
+	foundOfflineAccess := false
 	for _, scope := range realm.ClientScopes {
+		if scope.Name == "offline_access" {
+			foundOfflineAccess = true
+		}
 		for _, mapper := range scope.ProtocolMappers {
 			if mapper.ProtocolMapper == "oidc-group-membership-mapper" && mapper.Config.ClaimName == "groups" {
 				foundGroupsClaim = true
@@ -193,5 +197,8 @@ func TestRealmAccessGroups(t *testing.T) {
 	}
 	if !foundGroupsClaim {
 		t.Error("realm tokens do not include a groups claim")
+	}
+	if !foundOfflineAccess {
+		t.Error("realm is missing offline_access client scope")
 	}
 }
