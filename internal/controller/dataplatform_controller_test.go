@@ -27,6 +27,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -312,6 +313,55 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(updated.Status.SupersetEndpoint).To(Equal("http://superset.superset.svc:8088"))
 		Expect(updated.Status.KeycloakEndpoint).To(Equal("http://keycloak.keycloak.svc:8080"))
 		Expect(updated.Status.OpenFGAEndpoint).To(Equal("http://openfga.openfga.svc:8081"))
+	})
+
+	It("seeds sample Iceberg tables once the warehouse and Trino are ready", func() {
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		markStatefulSetReady(ctx, namePostgres, nameLakekeeper)
+		markStatefulSetReady(ctx, nameMinio, nameMinio)
+		markDeploymentReady(ctx, nameKeycloak, nameKeycloak)
+		bringUpOpenFGA(ctx, reconciler, typeNamespacedName)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		markDeploymentReady(ctx, nameLakekeeper, nameLakekeeper)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		minioJob := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameMinioBucketJob, Namespace: nameMinio}, minioJob)).To(Succeed())
+		minioJob.Status.Succeeded = 1
+		Expect(k8sClient.Status().Update(ctx, minioJob)).To(Succeed())
+
+		markDeploymentReady(ctx, nameTrino, nameTrino)
+		markDeploymentReady(ctx, nameOPA, nameOpenFGA)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapSampleData, Namespace: nameTrino}, cm)).To(Succeed())
+		Expect(cm.Data[sampleDataSQLKey]).To(ContainSubstring("CREATE SCHEMA IF NOT EXISTS lakekeeper.sales"))
+		Expect(cm.Data[sampleDataSQLKey]).To(ContainSubstring("lakekeeper.sales.orders"))
+		Expect(cm.Data[sampleDataSQLKey]).To(ContainSubstring("lakekeeper.sales.invoices"))
+		Expect(cm.Data[sampleDataScriptKey]).To(ContainSubstring("v1/statement"))
+
+		job := &batchv1.Job{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameSampleDataJob, Namespace: nameTrino}, job)).To(Succeed())
+		Expect(job.Spec.Template.Spec.Containers[0].Image).To(Equal(dataplatformv1alpha1.DefaultSampleDataImage))
+		Expect(job.Spec.Template.Spec.Containers[0].Env).To(ContainElement(HaveField("Name", "TRINO_URL")))
+		// Default CR enables Superset, so Trino OAuth is on and the Job uses a password grant.
+		Expect(job.Spec.Template.Spec.Containers[0].Env).To(ContainElement(HaveField("Name", "TOKEN_URL")))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretSampleDataOIDC, Namespace: nameTrino}, &corev1.Secret{})).To(Succeed())
+
+		job.Status.Succeeded = 1
+		Expect(k8sClient.Status().Update(ctx, job)).To(Succeed())
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		updated := &dataplatformv1alpha1.DataPlatform{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, dataplatformv1alpha1.ConditionSampleDataReady)).To(BeTrue())
 	})
 
 	It("advertises publicURL as the Keycloak hostname behind ingress", func() {

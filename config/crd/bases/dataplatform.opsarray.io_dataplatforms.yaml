@@ -1200,6 +1200,27 @@ spec:
                         type: string
                     type: object
                 type: object
+              sampleData:
+                description: |-
+                  sampleData seeds a demo Iceberg schema with a few tables and rows once
+                  Trino and the warehouse are ready, so you can try queries immediately.
+                properties:
+                  enabled:
+                    description: |-
+                      enabled creates schema sales with sample orders/invoices tables once Trino
+                      and the warehouse are ready. Defaults to true when Trino is enabled.
+                      Requires embedded Keycloak (or auth disabled) so the seed Job can authenticate.
+                    type: boolean
+                  image:
+                    description: |-
+                      image is the container image used by the one-shot seed Job.
+                      Defaults to python:3.12-alpine.
+                    type: string
+                  schema:
+                    description: schema is the Trino/Iceberg schema (namespace) name.
+                      Defaults to "sales".
+                    type: string
+                type: object
               storage:
                 description: |-
                   storage configures the object store used by the Iceberg warehouse.
@@ -2071,6 +2092,7 @@ spec:
                   - "TrinoReady": the Trino coordinator is ready
                   - "FlinkReady": the Flink session cluster is ready
                   - "SupersetReady": the Superset Deployment is ready
+                  - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
 
                   The status of each condition is one of True, False, or Unknown.
                 items:

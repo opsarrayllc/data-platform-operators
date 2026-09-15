@@ -10,11 +10,15 @@
 # DBeaver against Trino: docs/dbeaver.md (OAuth2 + mkcert trust; not username/password).
 # Superset: https://superset.data-platform.local (Keycloak login). First Trino query may
 # prompt a one-time OAuth consent; catalog/row/column access follows the same groups and authz policies.
+# Sample data (default on): lakekeeper.sales.orders and lakekeeper.sales.invoices are seeded
+# automatically once Trino and the warehouse are ready.
 apiVersion: dataplatform.opsarray.io/v1alpha1
 kind: DataPlatform
 metadata:
   name: local
 spec:
+  sampleData:
+    enabled: true
   auth:
     embedded: true
     keycloak:

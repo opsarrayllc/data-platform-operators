@@ -81,6 +81,9 @@ linters:
         path: internal/controller/authzstore.go
       - linters:
           - goconst
+        path: internal/controller/sampledata.go
+      - linters:
+          - goconst
         path: .*_test.go
     paths:
       - third_party$

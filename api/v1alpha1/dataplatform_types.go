@@ -43,6 +43,8 @@ const (
 	ConditionAuthReady = "AuthReady"
 	// ConditionOpenFGAReady is True when OpenFGA is usable, or when authorization is disabled.
 	ConditionOpenFGAReady = "OpenFGAReady"
+	// ConditionSampleDataReady is True when demo Iceberg tables are seeded, or sample data is disabled.
+	ConditionSampleDataReady = "SampleDataReady"
 
 	DefaultLakekeeperNamespace = "lakekeeper"
 	DefaultTrinoNamespace      = "trino"
@@ -70,6 +72,10 @@ const (
 	DefaultOpenFGAImage      = "openfga/openfga:v1.8.12"
 	DefaultOPAImage          = "openpolicyagent/opa:1.10.1"
 	DefaultOpenFGAStore      = "lakekeeper"
+	// DefaultSampleDataImage runs the one-shot Trino SQL seed Job.
+	DefaultSampleDataImage = "python:3.12-alpine"
+	// DefaultSampleDataSchema is the Iceberg namespace / Trino schema used for demo tables.
+	DefaultSampleDataSchema = "sales"
 	// DefaultTrinoCatalog is the Trino catalog the operator points at the
 	// managed LakeKeeper warehouse.
 	DefaultTrinoCatalog = "lakekeeper"
@@ -146,6 +152,11 @@ type DataPlatformSpec struct {
 	// flink configures a shared Flink session cluster for streaming and CDC jobs.
 	// +optional
 	Flink FlinkSpec `json:"flink"`
+
+	// sampleData seeds a demo Iceberg schema with a few tables and rows once
+	// Trino and the warehouse are ready, so you can try queries immediately.
+	// +optional
+	SampleData SampleDataSpec `json:"sampleData"`
 
 	// superset configures Apache Superset for BI against Trino.
 	// +optional
@@ -885,6 +896,24 @@ type ServiceSpec struct {
 	Type corev1.ServiceType `json:"type,omitempty"`
 }
 
+// SampleDataSpec seeds demo Iceberg tables through Trino for local testing.
+type SampleDataSpec struct {
+	// enabled creates schema sales with sample orders/invoices tables once Trino
+	// and the warehouse are ready. Defaults to true when Trino is enabled.
+	// Requires embedded Keycloak (or auth disabled) so the seed Job can authenticate.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// schema is the Trino/Iceberg schema (namespace) name. Defaults to "sales".
+	// +optional
+	Schema string `json:"schema,omitempty"`
+
+	// image is the container image used by the one-shot seed Job.
+	// Defaults to python:3.12-alpine.
+	// +optional
+	Image string `json:"image,omitempty"`
+}
+
 // DataPlatformStatus defines the observed state of DataPlatform.
 type DataPlatformStatus struct {
 	// conditions represent the current state of the DataPlatform resource.
@@ -900,6 +929,7 @@ type DataPlatformStatus struct {
 	// - "TrinoReady": the Trino coordinator is ready
 	// - "FlinkReady": the Flink session cluster is ready
 	// - "SupersetReady": the Superset Deployment is ready
+	// - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
 	//
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map

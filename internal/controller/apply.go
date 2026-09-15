@@ -55,6 +55,7 @@ const (
 	componentSuperset         = "superset"
 	componentSupersetPostgres = "superset-postgres"
 	componentSupersetRedis    = "superset-redis"
+	componentSampleData       = "sample-data"
 	componentKeycloak         = "keycloak"
 	componentOpenFGA          = "openfga"
 	componentOpenFGAPostgres  = "openfga-postgres"
@@ -65,6 +66,7 @@ const (
 	nameLakekeeper            = "lakekeeper"
 	nameTrino                 = "trino"
 	nameTrinoWorker           = "trino-worker"
+	nameSampleDataJob         = "trino-sample-data"
 	nameFlink                 = "flink"
 	nameFlinkJobManager       = "flink-jobmanager"
 	nameFlinkTaskManager      = "flink-taskmanager"
@@ -86,6 +88,8 @@ const (
 	secretSuperset            = "superset"
 	secretSupersetOIDC        = "superset-oidc"
 	configMapSuperset         = "superset-config"
+	configMapSampleData       = "trino-sample-data"
+	secretSampleDataOIDC      = "trino-sample-data-oidc"
 	secretKeycloakAdmin       = "keycloak-admin"
 	secretOIDC                = "oidc"
 	secretOpenFGA             = "openfga"
@@ -195,7 +199,7 @@ const (
 func labelsFor(dp *dataplatformv1alpha1.DataPlatform, component string) map[string]string {
 	name := component
 	switch component {
-	case componentTrinoCoordinator, componentTrinoWorker:
+	case componentTrinoCoordinator, componentTrinoWorker, componentSampleData:
 		name = nameTrino
 	case componentFlinkJobManager, componentFlinkTaskManager, componentFlinkOAuth2Proxy:
 		name = nameFlink

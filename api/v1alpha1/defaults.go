@@ -371,6 +371,21 @@ func (s *OIDCCredentialsSecretRef) ClientSecretKeyOrDefault() string {
 	return stringOrDefault(s.ClientSecretKey, "clientSecret")
 }
 
+// IsEnabled reports whether demo Iceberg tables should be seeded. Nil defaults to true.
+func (s *SampleDataSpec) IsEnabled() bool {
+	return boolDefaultTrue(s.Enabled)
+}
+
+// SchemaOrDefault returns the demo schema/namespace name.
+func (s *SampleDataSpec) SchemaOrDefault() string {
+	return stringOrDefault(s.Schema, DefaultSampleDataSchema)
+}
+
+// ImageOrDefault returns the seed Job container image.
+func (s *SampleDataSpec) ImageOrDefault() string {
+	return stringOrDefault(s.Image, DefaultSampleDataImage)
+}
+
 // UsernameKeyOrDefault returns the Secret key for the database user.
 func (s *PostgresCredentialsSecretRef) UsernameKeyOrDefault() string {
 	return stringOrDefault(s.UsernameKey, "username")
