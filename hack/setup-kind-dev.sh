@@ -14,8 +14,8 @@ KUBECTL_BIN="${KUBECTL:-kubectl}"
 CERT_DIR="${KIND_CERT_DIR:-${ROOT}/bin/certs}"
 KUBECONFIG_FILE="${KIND_KUBECONFIG:-${ROOT}/bin/kubeconfig-${CLUSTER}}"
 TLS_SECRET="${KIND_TLS_SECRET:-data-platform-tls}"
-NAMESPACES=(keycloak lakekeeper trino openfga flink superset)
-HOSTS=(keycloak lakekeeper trino openfga opa flink superset)
+NAMESPACES=(keycloak lakekeeper trino openfga flink superset minio)
+HOSTS=(keycloak lakekeeper trino openfga opa flink superset minio)
 
 abs_from_root() {
 	case "$1" in
