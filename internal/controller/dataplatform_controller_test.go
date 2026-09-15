@@ -243,6 +243,8 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DATABASE_OAUTH2_CLIENTS"))
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"Trino"`))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`database_name=name`))
+		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`impersonate_user = True`))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DB_CONNECTION_MUTATOR"))
 
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, svc)).To(Succeed())
 		cfg := &corev1.Secret{}

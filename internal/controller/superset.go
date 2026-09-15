@@ -565,6 +565,28 @@ func (r *DataPlatformReconciler) supersetConfig(
 		b.WriteString("        \"request_content_type\": \"data\",\n")
 		b.WriteString("    },\n")
 		b.WriteString("}\n")
+		// Superset's Trino engine sets X-Trino-User from the Superset login name.
+		// Trino OAuth principal-field is `sub`, and OPA maps that to oidc~{sub}
+		// for LakeKeeper. Rewrite the Trino user to the JWT subject so catalog
+		// grants match.
+		b.WriteString("def DB_CONNECTION_MUTATOR(uri, params, username, security_manager, source):\n")
+		b.WriteString("    import base64, json\n")
+		b.WriteString("    connect_args = params.setdefault(\"connect_args\", {})\n")
+		b.WriteString("    session = connect_args.get(\"http_session\")\n")
+		b.WriteString("    auth = None\n")
+		b.WriteString("    if session is not None:\n")
+		b.WriteString("        auth = session.headers.get(\"Authorization\") or session.headers.get(\"authorization\")\n")
+		b.WriteString("    if isinstance(auth, str) and auth.lower().startswith(\"bearer \"):\n")
+		b.WriteString("        token = auth.split(\" \", 1)[1].strip()\n")
+		b.WriteString("        try:\n")
+		b.WriteString("            payload = token.split(\".\")[1]\n")
+		b.WriteString("            payload += \"=\" * (-len(payload) % 4)\n")
+		b.WriteString("            claims = json.loads(base64.urlsafe_b64decode(payload.encode(\"ascii\")))\n")
+		b.WriteString("            if sub := claims.get(\"sub\"):\n")
+		b.WriteString("                connect_args[\"user\"] = sub\n")
+		b.WriteString("        except Exception:\n")
+		b.WriteString("            pass\n")
+		b.WriteString("    return uri, params\n")
 	} else {
 		b.WriteString("AUTH_TYPE = AUTH_DB\n")
 	}
@@ -593,6 +615,11 @@ func supersetBootstrapTrino(dp *dataplatformv1alpha1.DataPlatform) string {
 	b.WriteString("    else:\n")
 	b.WriteString("        database = existing\n")
 	b.WriteString("        database.set_sqlalchemy_uri(uri)\n")
+	// Superset only attaches the per-user OAuth Bearer token when impersonation
+	// is on (see Database._get_sqla_engine → update_impersonation_config).
+	// Without it, schema/table listing keeps re-raising OAuth2RedirectError
+	// even after a successful /api/v1/database/oauth2/ callback.
+	b.WriteString("    database.impersonate_user = True\n")
 	b.WriteString("    extra = database.get_extra() or {}\n")
 	b.WriteString("    extra[\"allows_virtual_table_explore\"] = True\n")
 	b.WriteString("    # Mark OAuth2 so SQL Lab triggers the per-user Trino token dance.\n")
