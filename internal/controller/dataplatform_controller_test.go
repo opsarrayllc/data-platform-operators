@@ -135,7 +135,7 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
 	})
 
-	It("creates MinIO, Keycloak, Postgres, LakeKeeper, Trino, and Flink resources", func() {
+	It("creates MinIO, Keycloak, Postgres, LakeKeeper, Trino, and Superset resources", func() {
 		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 		Expect(err).NotTo(HaveOccurred())
 
@@ -159,7 +159,6 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring("oidc-sub-mapper"))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"basic"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"opa"`))
-		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"flink"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"platform-admins"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"data-engineers"`))
@@ -206,31 +205,6 @@ var _ = Describe("DataPlatform Controller", func() {
 		By("creating the Trino coordinator wired to MinIO and OIDC")
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, deploy)).To(Succeed())
 		Expect(deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(ptr.To(uidTrino)))
-
-		By("creating the Flink session cluster")
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkJobManager, Namespace: nameFlink}, deploy)).To(Succeed())
-		Expect(deploy.Spec.Template.Spec.Containers[0].SecurityContext.RunAsUser).To(Equal(ptr.To(uidFlink)))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"jobmanager"}))
-		var flinkProps *corev1.EnvVar
-		for i := range deploy.Spec.Template.Spec.Containers[0].Env {
-			if deploy.Spec.Template.Spec.Containers[0].Env[i].Name == "FLINK_PROPERTIES" {
-				flinkProps = &deploy.Spec.Template.Spec.Containers[0].Env[i]
-				break
-			}
-		}
-		Expect(flinkProps).NotTo(BeNil())
-		Expect(flinkProps.ValueFrom).NotTo(BeNil())
-		Expect(flinkProps.ValueFrom.ConfigMapKeyRef.Name).To(Equal(configMapFlink))
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkTaskManager, Namespace: nameFlink}, deploy)).To(Succeed())
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(Equal([]string{"taskmanager"}))
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkJobManager, Namespace: nameFlink}, svc)).To(Succeed())
-		flinkCM := &corev1.ConfigMap{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapFlink, Namespace: nameFlink}, flinkCM)).To(Succeed())
-		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("jobmanager.rpc.address: flink-jobmanager.flink.svc"))
-		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.numberOfTaskSlots: 2"))
-		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.rpc.port: 6122"))
-		Expect(flinkCM.Data["flink-conf.yaml"]).To(ContainSubstring("taskmanager.data.port: 6121"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket.Port.IntVal).To(Equal(flinkTMRpcPort))
 
 		By("creating Superset with Keycloak OAuth and a Trino database seed")
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: namePostgres, Namespace: nameSuperset}, sts)).To(Succeed())
@@ -311,7 +285,6 @@ var _ = Describe("DataPlatform Controller", func() {
 		Expect(updated.Status.MinioEndpoint).To(Equal("http://minio.minio.svc:9000"))
 		Expect(updated.Status.LakekeeperEndpoint).To(Equal("http://lakekeeper.lakekeeper.svc:8181"))
 		Expect(updated.Status.TrinoEndpoint).To(Equal("http://trino.trino.svc:8080"))
-		Expect(updated.Status.FlinkEndpoint).To(Equal("http://flink-jobmanager.flink.svc:8081"))
 		Expect(updated.Status.SupersetEndpoint).To(Equal("http://superset.superset.svc:8088"))
 		Expect(updated.Status.KeycloakEndpoint).To(Equal("http://keycloak.keycloak.svc:8080"))
 		Expect(updated.Status.OpenFGAEndpoint).To(Equal("http://openfga.openfga.svc:8081"))
@@ -428,37 +401,6 @@ var _ = Describe("DataPlatform Controller", func() {
 		deploy := &appsv1.Deployment{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, deploy)).To(Succeed())
 		Expect(deploy.Spec.Template.Spec.Containers[0].ReadinessProbe.TCPSocket).NotTo(BeNil())
-	})
-
-	It("puts oauth2-proxy in front of Flink when publicURL is set", func() {
-		resource := &dataplatformv1alpha1.DataPlatform{}
-		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
-		resource.Spec.Auth.Keycloak.PublicURL = "https://keycloak.data-platform.local"
-		resource.Spec.Flink.PublicURL = "https://flink.data-platform.local"
-		Expect(k8sClient.Update(ctx, resource)).To(Succeed())
-
-		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
-		Expect(err).NotTo(HaveOccurred())
-
-		realmCM := &corev1.ConfigMap{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapKeycloakRealm, Namespace: nameKeycloak}, realmCM)).To(Succeed())
-		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"flink"`))
-		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring("https://flink.data-platform.local/oauth2/callback"))
-
-		deploy := &appsv1.Deployment{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlinkOAuth2Proxy, Namespace: nameFlink}, deploy)).To(Succeed())
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--provider=oidc"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--oidc-issuer-url=https://keycloak.data-platform.local/realms/dataplatform"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--redirect-url=https://flink.data-platform.local/oauth2/callback"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--login-url=https://keycloak.data-platform.local/realms/dataplatform/protocol/openid-connect/auth"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--redeem-url=http://keycloak.keycloak.svc:8080/realms/dataplatform/protocol/openid-connect/token"))
-		Expect(deploy.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--oidc-jwks-url=http://keycloak.keycloak.svc:8080/realms/dataplatform/protocol/openid-connect/certs"))
-
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretFlinkOIDC, Namespace: nameFlink}, &corev1.Secret{})).To(Succeed())
-		svc := &corev1.Service{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameFlink, Namespace: nameFlink}, svc)).To(Succeed())
-		Expect(svc.Spec.Selector[labelAppComponent]).To(Equal(componentFlinkOAuth2Proxy))
-		Expect(svc.Spec.Ports[0].TargetPort.IntVal).To(Equal(oauth2ProxyPort))
 	})
 
 	It("wires Superset Keycloak OAuth and enables Trino OAuth2 without a Trino publicURL", func() {

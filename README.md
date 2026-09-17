@@ -224,7 +224,7 @@ make run
 kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
 ```
 
-That brings up Keycloak, LakeKeeper, Trino, Flink, and Superset behind mkcert TLS on
+That brings up Keycloak, LakeKeeper, Trino, and Superset behind mkcert TLS on
 `*.data-platform.local`. Open `https://superset.data-platform.local` and sign in
 with Keycloak (`admin` / password from `keycloak/keycloak-admin`). To query Trino
 from DBeaver-CE, see [docs/dbeaver.md](docs/dbeaver.md).

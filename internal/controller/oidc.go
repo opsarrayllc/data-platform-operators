@@ -39,8 +39,6 @@ type oidcConfig struct {
 	trinoSecret      string
 	opaClientID      string
 	opaSecret        string
-	flinkClientID    string
-	flinkSecret      string
 	supersetClientID string
 	supersetSecret   string
 	operatorClientID string
@@ -126,25 +124,8 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		}
 	}
 
-	flinkID := trinoID
-	flinkSecret := trinoSecret
-	if ref.FlinkClientIDKey != "" {
-		flinkID, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.FlinkClientIDKey)
-		if err != nil {
-			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
-			return oidcConfig{}, err
-		}
-	}
-	if ref.FlinkClientSecretKey != "" {
-		flinkSecret, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.FlinkClientSecretKey)
-		if err != nil {
-			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
-			return oidcConfig{}, err
-		}
-	}
-
-	supersetID := flinkID
-	supersetSecret := flinkSecret
+	supersetID := trinoID
+	supersetSecret := trinoSecret
 	if ref.SupersetClientIDKey != "" {
 		supersetID, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.SupersetClientIDKey)
 		if err != nil {
@@ -171,8 +152,6 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		trinoSecret:      trinoSecret,
 		opaClientID:      trinoID,
 		opaSecret:        trinoSecret,
-		flinkClientID:    flinkID,
-		flinkSecret:      flinkSecret,
 		supersetClientID: supersetID,
 		supersetSecret:   supersetSecret,
 		operatorClientID: clientID,

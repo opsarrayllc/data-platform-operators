@@ -33,8 +33,6 @@ const (
 	ConditionWarehouseReady = "WarehouseReady"
 	// ConditionTrinoReady is True when the Trino coordinator is ready.
 	ConditionTrinoReady = "TrinoReady"
-	// ConditionFlinkReady is True when the Flink session cluster is ready.
-	ConditionFlinkReady = "FlinkReady"
 	// ConditionSupersetReady is True when the Superset Deployment is ready.
 	ConditionSupersetReady = "SupersetReady"
 	// ConditionMinioReady is True when in-cluster MinIO is usable, or when using an external store.
@@ -48,30 +46,24 @@ const (
 
 	DefaultLakekeeperNamespace = "lakekeeper"
 	DefaultTrinoNamespace      = "trino"
-	DefaultFlinkNamespace      = "flink"
 	DefaultSupersetNamespace   = "superset"
 	DefaultMinioNamespace      = "minio"
 	DefaultKeycloakNamespace   = "keycloak"
 	DefaultOpenFGANamespace    = "openfga"
 	DefaultLakekeeperImage     = "quay.io/lakekeeper/catalog:v0.13.3"
 	DefaultTrinoImage          = "trinodb/trino:476"
-	DefaultFlinkImage          = "flink:1.20.5"
 	// DefaultSupersetImage is the operator-built image with authlib and the
 	// Trino dialect baked in (see images/superset/Dockerfile). Build/load it
 	// with `make docker-build-superset` (kind-up does this automatically).
-	DefaultSupersetImage     = "data-platform-superset:5.0.0"
-	DefaultRedisImage        = "redis:7.4-alpine"
-	DefaultPostgresImage     = "postgres:17"
-	DefaultFlinkTaskManagers = int32(1)
-	DefaultFlinkTaskSlots    = int32(2)
-	DefaultFlinkJMProcessMem = "1600m"
-	DefaultFlinkTMProcessMem = "1728m"
-	DefaultMinioImage        = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
-	DefaultMcImage           = "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
-	DefaultKeycloakImage     = "quay.io/keycloak/keycloak:26.3.3"
-	DefaultOpenFGAImage      = "openfga/openfga:v1.8.12"
-	DefaultOPAImage          = "openpolicyagent/opa:1.10.1"
-	DefaultOpenFGAStore      = "lakekeeper"
+	DefaultSupersetImage = "data-platform-superset:5.0.0"
+	DefaultRedisImage    = "redis:7.4-alpine"
+	DefaultPostgresImage = "postgres:17"
+	DefaultMinioImage    = "quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z"
+	DefaultMcImage       = "quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z"
+	DefaultKeycloakImage = "quay.io/keycloak/keycloak:26.3.3"
+	DefaultOpenFGAImage  = "openfga/openfga:v1.8.12"
+	DefaultOPAImage      = "openpolicyagent/opa:1.10.1"
+	DefaultOpenFGAStore  = "lakekeeper"
 	// DefaultSampleDataImage runs the one-shot Trino SQL seed Job.
 	DefaultSampleDataImage = "python:3.12-alpine"
 	// DefaultSampleDataSchema is the Iceberg namespace / Trino schema used for demo tables.
@@ -102,12 +94,10 @@ const (
 	DefaultOIDCClientID         = "lakekeeper"
 	DefaultOIDCTrinoClientID    = "trino"
 	DefaultOIDCOpaClientID      = "opa"
-	DefaultOIDCFlinkClientID    = "flink"
 	DefaultOIDCSupersetClientID = "superset"
 	DefaultOIDCOperatorClient   = "operator"
 	DefaultOIDCScope            = "lakekeeper"
 	DefaultOIDCAdminUser        = "admin"
-	DefaultOAuth2ProxyImage     = "quay.io/oauth2-proxy/oauth2-proxy:v7.15.4"
 	// DefaultOIDCAdminUserID is imported as the Keycloak user id for the local
 	// admin, which makes the OIDC subject predictable. The operator needs to know
 	// it up front to grant that user LakeKeeper's admin role after bootstrap.
@@ -149,10 +139,6 @@ type DataPlatformSpec struct {
 	// +optional
 	Trino TrinoSpec `json:"trino"`
 
-	// flink configures a shared Flink session cluster for streaming and CDC jobs.
-	// +optional
-	Flink FlinkSpec `json:"flink"`
-
 	// sampleData seeds a demo Iceberg schema with a few tables and rows once
 	// Trino and the warehouse are ready, so you can try queries immediately.
 	// +optional
@@ -168,9 +154,8 @@ type DataPlatformSpec struct {
 // to use an existing provider such as Okta or JumpCloud.
 type AuthSpec struct {
 	// enabled turns on OIDC for LakeKeeper, OpenFGA clients, the Trino Iceberg
-	// catalog, the Trino Web UI when spec.trino.publicURL is set, the Flink
-	// Web UI when spec.flink.publicURL is set, and Superset when it is enabled.
-	// Defaults to true.
+	// catalog, the Trino Web UI when spec.trino.publicURL is set, and Superset
+	// when it is enabled. Defaults to true.
 	// +optional
 	Enabled *bool `json:"enabled,omitempty"`
 
@@ -275,14 +260,6 @@ type OIDCCredentialsSecretRef struct {
 	// trinoClientSecretKey, if set, uses a separate secret for the Trino client.
 	// +optional
 	TrinoClientSecretKey string `json:"trinoClientSecretKey,omitempty"`
-
-	// flinkClientIDKey, if set, uses a separate confidential client for the Flink Web UI.
-	// +optional
-	FlinkClientIDKey string `json:"flinkClientIDKey,omitempty"`
-
-	// flinkClientSecretKey, if set, uses a separate secret for the Flink Web UI client.
-	// +optional
-	FlinkClientSecretKey string `json:"flinkClientSecretKey,omitempty"`
 
 	// supersetClientIDKey, if set, uses a separate confidential client for Superset.
 	// +optional
@@ -753,85 +730,6 @@ type TrinoCoordinatorSpec struct {
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
-// FlinkSpec configures a shared Flink session cluster (JobManager + TaskManagers).
-// Pipelines submit jobs to this cluster rather than each getting its own Flink install.
-type FlinkSpec struct {
-	// enabled deploys Flink. Defaults to true.
-	// +optional
-	Enabled *bool `json:"enabled,omitempty"`
-
-	// namespace is the Kubernetes namespace for Flink.
-	// Defaults to "flink". Use a unique value if you create multiple DataPlatforms.
-	// +optional
-	Namespace string `json:"namespace,omitempty"`
-
-	// image is the Flink container image.
-	// +optional
-	Image string `json:"image,omitempty"`
-
-	// taskManagers is the number of TaskManager pods. Defaults to 1.
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	TaskManagers *int32 `json:"taskManagers,omitempty"`
-
-	// taskSlots is taskmanager.numberOfTaskSlots. Defaults to 2.
-	// +optional
-	// +kubebuilder:validation:Minimum=1
-	TaskSlots *int32 `json:"taskSlots,omitempty"`
-
-	// jobManager configures the JobManager pod.
-	// +optional
-	JobManager FlinkJobManagerSpec `json:"jobManager"`
-
-	// taskManager configures TaskManager pods.
-	// +optional
-	TaskManager FlinkTaskManagerSpec `json:"taskManager"`
-
-	// extraConfig is merged into flink-conf.yaml (key: value).
-	// +optional
-	ExtraConfig map[string]string `json:"extraConfig,omitempty"`
-
-	// extraEnv is appended to Flink containers.
-	// +optional
-	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
-
-	// publicURL is the Flink Web UI URL browsers use (for example https://flink.example.com).
-	// When set and auth is enabled, browsers reach the UI through oauth2-proxy with OIDC
-	// (Keycloak by default). In-cluster clients still talk to the JobManager REST API directly.
-	// +optional
-	PublicURL string `json:"publicURL,omitempty"`
-
-	// oauth2ProxyImage is the oauth2-proxy image used in front of the Flink Web UI.
-	// +optional
-	OAuth2ProxyImage string `json:"oauth2ProxyImage,omitempty"`
-
-	// service exposes the JobManager REST/RPC ports.
-	// +optional
-	Service ServiceSpec `json:"service"`
-}
-
-// FlinkJobManagerSpec configures the JobManager pod.
-type FlinkJobManagerSpec struct {
-	// processMemory is jobmanager.memory.process.size (for example "1600m").
-	// +optional
-	ProcessMemory string `json:"processMemory,omitempty"`
-
-	// resources are compute resource requirements for the JobManager container.
-	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-}
-
-// FlinkTaskManagerSpec configures TaskManager pods.
-type FlinkTaskManagerSpec struct {
-	// processMemory is taskmanager.memory.process.size (for example "1728m").
-	// +optional
-	ProcessMemory string `json:"processMemory,omitempty"`
-
-	// resources are compute resource requirements for TaskManager containers.
-	// +optional
-	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
-}
-
 // SupersetSpec configures Apache Superset for BI dashboards against Trino.
 // When auth is enabled, users sign in with Keycloak (AUTH_OAUTH). Queries run
 // through Trino with per-user OAuth2 tokens so existing OPA/LakeKeeper policies
@@ -927,7 +825,6 @@ type DataPlatformStatus struct {
 	// - "LakekeeperReady": the catalog Deployment is ready
 	// - "WarehouseReady": the Iceberg warehouse has been created
 	// - "TrinoReady": the Trino coordinator is ready
-	// - "FlinkReady": the Flink session cluster is ready
 	// - "SupersetReady": the Superset Deployment is ready
 	// - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
 	//
@@ -948,10 +845,6 @@ type DataPlatformStatus struct {
 	// trinoEndpoint is the in-cluster HTTP URL of the Trino coordinator.
 	// +optional
 	TrinoEndpoint string `json:"trinoEndpoint,omitempty"`
-
-	// flinkEndpoint is the in-cluster HTTP URL of the Flink JobManager REST API.
-	// +optional
-	FlinkEndpoint string `json:"flinkEndpoint,omitempty"`
 
 	// supersetEndpoint is the in-cluster HTTP URL of Superset.
 	// +optional
@@ -978,7 +871,6 @@ type DataPlatformStatus struct {
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Lakekeeper",type=string,JSONPath=".status.lakekeeperEndpoint"
 // +kubebuilder:printcolumn:name="Trino",type=string,JSONPath=".status.trinoEndpoint"
-// +kubebuilder:printcolumn:name="Flink",type=string,JSONPath=".status.flinkEndpoint"
 // +kubebuilder:printcolumn:name="Superset",type=string,JSONPath=".status.supersetEndpoint"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 

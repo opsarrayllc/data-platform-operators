@@ -14,8 +14,8 @@ KUBECTL_BIN="${KUBECTL:-kubectl}"
 CERT_DIR="${KIND_CERT_DIR:-${ROOT}/bin/certs}"
 KUBECONFIG_FILE="${KIND_KUBECONFIG:-${ROOT}/bin/kubeconfig-${CLUSTER}}"
 TLS_SECRET="${KIND_TLS_SECRET:-data-platform-tls}"
-NAMESPACES=(keycloak lakekeeper trino openfga flink superset minio)
-HOSTS=(keycloak lakekeeper trino openfga opa flink superset minio)
+NAMESPACES=(keycloak lakekeeper trino openfga superset minio)
+HOSTS=(keycloak lakekeeper trino openfga opa superset minio)
 
 abs_from_root() {
 	case "$1" in
@@ -147,7 +147,6 @@ echo "  https://lakekeeper.${DOMAIN}"
 echo "  https://trino.${DOMAIN}"
 echo "  https://openfga.${DOMAIN}"
 echo "  https://opa.${DOMAIN}"
-echo "  https://flink.${DOMAIN}"
 echo "  https://superset.${DOMAIN}"
 echo "Admin password (after Keycloak is Ready):"
 echo "  kubectl --context ${CONTEXT} get secret keycloak-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo"
