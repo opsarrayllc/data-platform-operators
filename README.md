@@ -44,6 +44,7 @@ make lint                 # golangci-lint
 make build                # compile the data lake manager to bin/manager
 make run-data-lake        # run the data lake operator against your current kubecontext
 make run-data-analytics   # run the data analytics operator against your current kubecontext
+make platform-up          # recreate the kind cluster, apply local samples, run both operators
 ```
 
 Both run targets use your active kubeconfig context, so install the CRDs first:
@@ -220,6 +221,14 @@ kubebuilder create api --group dataplatform --version v1alpha1 --kind <Kind> --r
 Then re-run `make manifests generate`.
 
 ## Local kind cluster
+
+```bash
+make platform-up
+```
+
+That recreates the kind cluster, applies the local DataLake and Analytics samples, and runs both operators in the foreground. Ctrl+C stops the operators and leaves the cluster running.
+
+The same steps one at a time:
 
 ```bash
 make kind-up

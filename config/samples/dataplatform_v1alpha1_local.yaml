@@ -1,5 +1,6 @@
 # Local DataLake for kind (embedded MinIO + Postgres + Keycloak, coordinator-only Trino).
 #
+#   make platform-up  # cluster, this sample, the Analytics sample, and both operators
 #   make kind-up      # recreate cluster, ingress, mkcert TLS, CRDs
 #   make run-data-lake          # or: make deploy IMG=...
 #   kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml

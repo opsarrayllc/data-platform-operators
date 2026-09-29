@@ -224,6 +224,11 @@ undeploy: kustomize ## Undeploy controller from the K8s cluster specified in ~/.
 KIND_DEV_CLUSTER ?= data-platform-dev
 KIND_DEV_CONFIG ?= config/kind/kind-data-platform-dev.yaml
 
+.PHONY: platform-up
+platform-up: ## Recreate the kind cluster, apply local samples, and run both operators in the foreground.
+	KIND_DEV_CLUSTER="$(KIND_DEV_CLUSTER)" KIND_DEV_CONFIG="$(KIND_DEV_CONFIG)" \
+		KIND="$(KIND)" KUBECTL="$(KUBECTL)" ./hack/platform-up.sh
+
 .PHONY: kind-up
 kind-up: ## Recreate the local kind cluster with ingress-nginx, mkcert TLS, and CRDs.
 	KIND_DEV_CLUSTER="$(KIND_DEV_CLUSTER)" KIND_DEV_CONFIG="$(KIND_DEV_CONFIG)" \

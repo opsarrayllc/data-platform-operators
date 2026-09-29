@@ -141,12 +141,15 @@ fi
 
 echo
 echo "Kind cluster ${CLUSTER} is ready (kubeconfig ${KUBECONFIG_FILE}, context ${CONTEXT})."
-echo "Next:"
-echo "  make run-data-lake"
-echo "  make run-data-analytics"
-echo "  kubectl --context ${CONTEXT} apply -f config/samples/dataplatform_v1alpha1_local.yaml"
-echo "  kubectl --context ${CONTEXT} apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml"
-echo "Then open:"
+if [ "${PLATFORM_UP:-}" != "1" ]; then
+	echo "Next:"
+	echo "  make run-data-lake"
+	echo "  make run-data-analytics"
+	echo "  kubectl --context ${CONTEXT} apply -f config/samples/dataplatform_v1alpha1_local.yaml"
+	echo "  kubectl --context ${CONTEXT} apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml"
+	echo "Or replace this whole sequence, including kind-up, with: make platform-up"
+fi
+echo "Open:"
 echo "  https://keycloak.${DOMAIN}"
 echo "  https://lakekeeper.${DOMAIN}"
 echo "  https://trino.${DOMAIN}"
