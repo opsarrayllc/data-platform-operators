@@ -41,7 +41,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileKeycloak(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) (oidcConfig, bool, error) {
+func (r *DataLakeReconciler) reconcileKeycloak(ctx context.Context, dp *dataplatformv1alpha1.DataLake) (oidcConfig, bool, error) {
 	spec := dp.Spec.Auth.Keycloak
 	ns := spec.NamespaceOrDefault()
 	realm := spec.RealmOrDefault()
@@ -88,7 +88,7 @@ func (r *DataPlatformReconciler) reconcileKeycloak(ctx context.Context, dp *data
 	return cfg, true, nil
 }
 
-func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns, realm string) (oidcConfig, error) {
+func (r *DataLakeReconciler) embeddedOIDCConfig(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns, realm string) (oidcConfig, error) {
 	issuer := oidcIssuer(dp.Status.KeycloakEndpoint, realm)
 	publicIssuer := issuer
 	if dp.Spec.Auth.Keycloak.PublicURL != "" {
@@ -123,14 +123,6 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 	if err != nil {
 		return oidcConfig{}, err
 	}
-	supersetID, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCSupersetClientID)
-	if err != nil {
-		return oidcConfig{}, err
-	}
-	supersetSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCSupersetClientSecret)
-	if err != nil {
-		return oidcConfig{}, err
-	}
 
 	return oidcConfig{
 		enabled:          true,
@@ -143,8 +135,6 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 		trinoSecret:      trinoSecret,
 		opaClientID:      opaID,
 		opaSecret:        opaSecret,
-		supersetClientID: supersetID,
-		supersetSecret:   supersetSecret,
 		operatorClientID: operatorID,
 		operatorSecret:   operatorSecret,
 		adminSubject:     dataplatformv1alpha1.DefaultOIDCAdminUserID,
@@ -164,9 +154,9 @@ func (r *DataPlatformReconciler) embeddedOIDCConfig(ctx context.Context, dp *dat
 // it in a Secret. Keycloak holds realm keys in its own database, which is an
 // emptyDir here, so without importing a stable key every pod recreate would
 // resign with a fresh key and reject tokens issued before it.
-func (r *DataPlatformReconciler) ensureKeycloakRealmKey(
+func (r *DataLakeReconciler) ensureKeycloakRealmKey(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	secret := &corev1.Secret{}
@@ -217,7 +207,7 @@ func generateRealmSigningKey(realm string) (string, string, error) {
 	return base64.StdEncoding.EncodeToString(der), base64.StdEncoding.EncodeToString(certificate), nil
 }
 
-func (r *DataPlatformReconciler) ensureKeycloakSecrets(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	if err := r.ensureKeycloakRealmKey(ctx, dp, ns); err != nil {
 		return err
 	}
@@ -275,7 +265,7 @@ func (r *DataPlatformReconciler) ensureKeycloakSecrets(ctx context.Context, dp *
 	return r.ensureOIDCSecretKeys(ctx, oidc)
 }
 
-func (r *DataPlatformReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc *corev1.Secret) error {
+func (r *DataLakeReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc *corev1.Secret) error {
 	if oidc.Data == nil {
 		oidc.Data = map[string][]byte{}
 	}
@@ -310,9 +300,9 @@ func (r *DataPlatformReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc 
 	return r.Update(ctx, oidc)
 }
 
-func (r *DataPlatformReconciler) applyKeycloakRealm(
+func (r *DataLakeReconciler) applyKeycloakRealm(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.KeycloakSpec,
 ) (string, error) {
@@ -356,7 +346,6 @@ func (r *DataPlatformReconciler) applyKeycloakRealm(
 		lakekeeperNamespace: dp.Spec.Lakekeeper.NamespaceOrDefault(),
 		lakekeeperPublicURL: dp.Spec.Lakekeeper.PublicURL,
 		trinoPublicURL:      dp.Spec.Trino.PublicURL,
-		supersetPublicURL:   dp.Spec.Superset.PublicURL,
 	})
 	if err != nil {
 		return "", err
@@ -376,7 +365,7 @@ func (r *DataPlatformReconciler) applyKeycloakRealm(
 	return hashData(raw), nil
 }
 
-func (r *DataPlatformReconciler) applyKeycloakService(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) applyKeycloakService(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameKeycloak, Namespace: ns}}
 	labels := labelsFor(dp, componentKeycloak)
 	return r.apply(ctx, dp, svc, func() error {
@@ -391,9 +380,9 @@ func (r *DataPlatformReconciler) applyKeycloakService(ctx context.Context, dp *d
 	})
 }
 
-func (r *DataPlatformReconciler) applyKeycloakDeployment(
+func (r *DataLakeReconciler) applyKeycloakDeployment(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.KeycloakSpec,
 	realmHash string,
@@ -503,7 +492,6 @@ type realmOptions struct {
 	lakekeeperNamespace string
 	lakekeeperPublicURL string
 	trinoPublicURL      string
-	supersetPublicURL   string
 }
 
 func keycloakRealmJSON(opts realmOptions) (string, error) {
@@ -515,7 +503,6 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	supersetSecret := opts.supersetSecret
 	lakekeeperPublicURL := opts.lakekeeperPublicURL
 	trinoPublicURL := opts.trinoPublicURL
-	supersetPublicURL := opts.supersetPublicURL
 	realm := spec.RealmOrDefault()
 	lkCallback := clusterServiceURL(nameLakekeeper, opts.lakekeeperNamespace, lakekeeperPort) + "/ui/callback"
 	redirects := []string{
@@ -532,15 +519,11 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	if u := strings.TrimRight(trinoPublicURL, "/"); u != "" {
 		trinoRedirects = append(trinoRedirects, u+"/oauth2/callback")
 	}
-	// Superset's per-database OAuth2 dance uses the Trino client and redirects
-	// back to Superset after the user consents.
-	if u := strings.TrimRight(supersetPublicURL, "/"); u != "" {
-		trinoRedirects = append(trinoRedirects, u+"/api/v1/database/oauth2/")
-	}
-	supersetRedirects := []string{}
-	if u := strings.TrimRight(supersetPublicURL, "/"); u != "" {
-		supersetRedirects = append(supersetRedirects, u+"/oauth-authorized/keycloak")
-	}
+	// The analytics operator completes Trino's per-user OAuth against whatever
+	// public URL it publishes. Accept that callback without the lake knowing the host.
+	trinoRedirects = append(trinoRedirects, "*")
+	// Superset's own login redirect is chosen by the analytics operator too.
+	supersetRedirects := []string{"*"}
 
 	doc := map[string]any{
 		"realm":               realm,

@@ -107,8 +107,11 @@ for attempt in $(seq 1 30); do
 	sleep 2
 done
 
-echo "==> Installing DataPlatform CRDs"
+echo "==> Installing DataLake CRDs"
 make -C "${ROOT}" install KUBECONFIG="${KUBECONFIG_FILE}"
+
+echo "==> Installing Analytics CRDs"
+make -C "${ROOT}/data-analytics-operator" install KUBECONFIG="${KUBECONFIG_FILE}"
 
 SUPERSET_IMG="${SUPERSET_IMG:-data-platform-superset:5.0.0}"
 echo "==> Building and loading Superset image ${SUPERSET_IMG}"
@@ -139,8 +142,10 @@ fi
 echo
 echo "Kind cluster ${CLUSTER} is ready (kubeconfig ${KUBECONFIG_FILE}, context ${CONTEXT})."
 echo "Next:"
-echo "  make run"
+echo "  make run-data-lake"
+echo "  make run-data-analytics"
 echo "  kubectl --context ${CONTEXT} apply -f config/samples/dataplatform_v1alpha1_local.yaml"
+echo "  kubectl --context ${CONTEXT} apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml"
 echo "Then open:"
 echo "  https://keycloak.${DOMAIN}"
 echo "  https://lakekeeper.${DOMAIN}"

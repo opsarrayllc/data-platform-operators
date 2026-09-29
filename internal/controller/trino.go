@@ -37,7 +37,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileTrino(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
+func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatformv1alpha1.DataLake, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
 	ns := dp.Spec.Trino.NamespaceOrDefault()
 	dp.Status.TrinoEndpoint = clusterServiceURL(nameTrino, ns, trinoPort)
 
@@ -48,8 +48,8 @@ func (r *DataPlatformReconciler) reconcileTrino(ctx context.Context, dp *datapla
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	coordCfg := trinoConfigProperties(true, dp.Spec.Trino.WorkersOrDefault() == 0, ns, dp.Spec.Trino.ExtraConfig, oidc, dp.Spec.Trino.PublicURL, sharedSecret, dp.Spec.Superset.IsEnabled())
-	workerCfg := trinoConfigProperties(false, false, ns, dp.Spec.Trino.ExtraConfig, oidcConfig{}, "", sharedSecret, false)
+	coordCfg := trinoConfigProperties(true, dp.Spec.Trino.WorkersOrDefault() == 0, ns, dp.Spec.Trino.ExtraConfig, oidc, dp.Spec.Trino.PublicURL, sharedSecret)
+	workerCfg := trinoConfigProperties(false, false, ns, dp.Spec.Trino.ExtraConfig, oidcConfig{}, "", sharedSecret)
 	opaURL := ""
 	if fga.enabled && oidc.enabled {
 		opaURL = fga.opaURL
@@ -91,7 +91,7 @@ func (r *DataPlatformReconciler) reconcileTrino(ctx context.Context, dp *datapla
 	return nil
 }
 
-func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extra map[string]string, oidc oidcConfig, publicURL, sharedSecret string, supersetEnabled bool) string {
+func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extra map[string]string, oidc oidcConfig, publicURL, sharedSecret string) string {
 	discovery := clusterServiceURL(nameTrino, ns, trinoPort)
 	if coordinator {
 		// Announce to the local process. Using the Service DNS sends the
@@ -106,7 +106,7 @@ func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extr
 		"discovery.uri":                      discovery,
 		"node-scheduler.include-coordinator": fmt.Sprintf("%t", includeCoordinator),
 	}
-	oauthSQL := trinoOAuthEnabled(oidc, publicURL, supersetEnabled)
+	oauthSQL := trinoOAuthEnabled(oidc)
 	oauthUI := trinoUIAuthEnabled(oidc, publicURL)
 	if coordinator && oauthSQL {
 		maps.Copy(props, trinoOAuthProperties(oidc, oauthUI))
@@ -122,14 +122,11 @@ func trinoUIAuthEnabled(oidc oidcConfig, publicURL string) bool {
 	return oidc.enabled && strings.TrimRight(publicURL, "/") != ""
 }
 
-// trinoOAuthEnabled turns on coordinator OAuth2 so clients (Web UI and/or
-// Superset) can present Bearer tokens. The Web UI itself is only enabled when
-// publicURL is set; Superset needs the HTTP authenticator even without a public Trino UI.
-func trinoOAuthEnabled(oidc oidcConfig, publicURL string, supersetEnabled bool) bool {
-	if !oidc.enabled {
-		return false
-	}
-	return strings.TrimRight(publicURL, "/") != "" || supersetEnabled
+// trinoOAuthEnabled turns on coordinator OAuth2 whenever the lake has an identity
+// provider, so clients such as the analytics operator can present Bearer tokens.
+// The Web UI itself is only enabled when publicURL is set.
+func trinoOAuthEnabled(oidc oidcConfig) bool {
+	return oidc.enabled
 }
 
 func trinoAccessControlProperties(opaURL string, rowFilters, columnAccess bool) string {
@@ -179,8 +176,8 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 	return props
 }
 
-func (r *DataPlatformReconciler) trinoSharedSecret(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string, oidc oidcConfig) (string, error) {
-	if !trinoOAuthEnabled(oidc, dp.Spec.Trino.PublicURL, dp.Spec.Superset.IsEnabled()) {
+func (r *DataLakeReconciler) trinoSharedSecret(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string, oidc oidcConfig) (string, error) {
+	if !trinoOAuthEnabled(oidc) {
 		return "", nil
 	}
 	secret, err := randomHex(32)
@@ -211,9 +208,9 @@ func renderProperties(props map[string]string) string {
 	return b.String()
 }
 
-func (r *DataPlatformReconciler) trinoCatalogData(
+func (r *DataLakeReconciler) trinoCatalogData(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	store objectStore,
 	oidc oidcConfig,
 ) (map[string][]byte, string) {
@@ -236,7 +233,7 @@ func (r *DataPlatformReconciler) trinoCatalogData(
 	return data, hashData(parts...)
 }
 
-func lakekeeperCatalogProperties(dp *dataplatformv1alpha1.DataPlatform, store objectStore, oidc oidcConfig) string {
+func lakekeeperCatalogProperties(dp *dataplatformv1alpha1.DataLake, store objectStore, oidc oidcConfig) string {
 	lkNS := dp.Spec.Lakekeeper.NamespaceOrDefault()
 	uri := clusterServiceURL(nameLakekeeper, lkNS, lakekeeperPort) + "/catalog"
 	props := map[string]string{
@@ -271,9 +268,9 @@ func lakekeeperCatalogProperties(dp *dataplatformv1alpha1.DataPlatform, store ob
 	return renderProperties(props)
 }
 
-func (r *DataPlatformReconciler) applyTrinoConfigMap(
+func (r *DataLakeReconciler) applyTrinoConfigMap(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns, coordCfg, workerCfg, accessControl string,
 ) error {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: secretTrinoConfig, Namespace: ns}}
@@ -295,9 +292,9 @@ func (r *DataPlatformReconciler) applyTrinoConfigMap(
 	})
 }
 
-func (r *DataPlatformReconciler) applyTrinoCatalogSecret(
+func (r *DataLakeReconciler) applyTrinoCatalogSecret(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	data map[string][]byte,
 ) error {
@@ -311,9 +308,9 @@ func (r *DataPlatformReconciler) applyTrinoCatalogSecret(
 	})
 }
 
-func (r *DataPlatformReconciler) applyTrinoService(
+func (r *DataLakeReconciler) applyTrinoService(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameTrino, Namespace: ns}}
@@ -331,9 +328,9 @@ func (r *DataPlatformReconciler) applyTrinoService(
 	})
 }
 
-func (r *DataPlatformReconciler) applyTrinoCoordinator(
+func (r *DataLakeReconciler) applyTrinoCoordinator(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
 	oauth, opa bool,
 ) error {
@@ -362,9 +359,9 @@ func (r *DataPlatformReconciler) applyTrinoCoordinator(
 	})
 }
 
-func (r *DataPlatformReconciler) reconcileTrinoWorkers(
+func (r *DataLakeReconciler) reconcileTrinoWorkers(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
 ) error {
 	workers := dp.Spec.Trino.WorkersOrDefault()

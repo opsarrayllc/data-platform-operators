@@ -28,7 +28,7 @@ func TestSamplesDecodeStrictly(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read sample: %v", err)
 			}
-			dp := &dataplatformv1alpha1.DataPlatform{}
+			dp := &dataplatformv1alpha1.DataLake{}
 			if err := yaml.UnmarshalStrict(raw, dp); err != nil {
 				t.Fatalf("decode sample: %v", err)
 			}

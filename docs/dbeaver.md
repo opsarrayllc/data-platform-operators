@@ -4,7 +4,7 @@ The local kind platform exposes Trino at `https://trino.data-platform.local`
 with **mkcert TLS** and **Keycloak OAuth2**. DBeaver must trust that CA and
 must not use username/password against Trino itself.
 
-Assumes you already ran `make kind-up`, `make run`, and applied
+Assumes you already ran `make kind-up`, `make run-data-lake`, and applied
 `config/samples/dataplatform_v1alpha1_local.yaml`.
 
 ## 1. Trust the mkcert CA in DBeaver's JRE

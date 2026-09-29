@@ -12,3 +12,6 @@
 # Re-include Go module files
 !go.mod
 !go.sum
+
+# The analytics operator is a separate image.
+data-analytics-operator

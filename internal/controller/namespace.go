@@ -29,9 +29,9 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) ensureNamespace(
+func (r *DataLakeReconciler) ensureNamespace(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	name, component string,
 ) error {
 	log := logf.FromContext(ctx)

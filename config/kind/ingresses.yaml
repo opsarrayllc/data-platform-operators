@@ -1,6 +1,7 @@
-# Ingresses for the local DataPlatform on kind (nginx + mkcert wildcard).
-# Applied by `make kind-up`. Backends exist after `make run` and applying
-# config/samples/dataplatform_v1alpha1_local.yaml.
+# Ingresses for the local DataLake on kind (nginx + mkcert wildcard).
+# Applied by `make kind-up`. Lake backends exist after `make run-data-lake`
+# and applying config/samples/dataplatform_v1alpha1_local.yaml. The Superset
+# backend exists after `make run-data-analytics` and applying the Analytics sample.
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

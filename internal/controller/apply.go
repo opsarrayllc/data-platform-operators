@@ -49,9 +49,6 @@ const (
 	componentLakekeeper       = "lakekeeper"
 	componentTrinoCoordinator = "trino-coordinator"
 	componentTrinoWorker      = "trino-worker"
-	componentSuperset         = "superset"
-	componentSupersetPostgres = "superset-postgres"
-	componentSupersetRedis    = "superset-redis"
 	componentSampleData       = "sample-data"
 	componentKeycloak         = "keycloak"
 	componentOpenFGA          = "openfga"
@@ -64,8 +61,6 @@ const (
 	nameTrino                 = "trino"
 	nameTrinoWorker           = "trino-worker"
 	nameSampleDataJob         = "trino-sample-data"
-	nameSuperset              = "superset"
-	nameSupersetRedis         = "superset-redis"
 	nameKeycloak              = "keycloak"
 	nameOpenFGA               = "openfga"
 	nameOPA                   = "opa"
@@ -76,9 +71,6 @@ const (
 	secretTrinoCatalog        = "trino-catalog-lakekeeper"
 	secretTrinoConfig         = "trino-config"
 	secretTrinoInternal       = "trino-internal"
-	secretSuperset            = "superset"
-	secretSupersetOIDC        = "superset-oidc"
-	configMapSuperset         = "superset-config"
 	configMapSampleData       = "trino-sample-data"
 	secretSampleDataOIDC      = "trino-sample-data-oidc"
 	secretKeycloakAdmin       = "keycloak-admin"
@@ -115,7 +107,6 @@ const (
 	keyOIDCOpaClientSecret       = "opaClientSecret"
 	keyOIDCSupersetClientID      = "supersetClientID"
 	keyOIDCSupersetClientSecret  = "supersetClientSecret"
-	keySupersetSecretKey         = "SECRET_KEY"
 	keyKeycloakAdminUser         = "username"
 	keyKeycloakAdminPassword     = "password"
 	keyTrinoSharedSecret         = "sharedSecret"
@@ -142,8 +133,6 @@ const (
 	lakekeeperPort               = int32(8181)
 	trinoPort                    = int32(8080)
 	keycloakPort                 = int32(8080)
-	supersetPort                 = int32(8088)
-	redisPort                    = int32(6379)
 	openfgaGRPCPort              = int32(8081)
 	openfgaHTTPPort              = int32(8080)
 	opaPort                      = int32(8181)
@@ -155,10 +144,6 @@ const (
 	gidLakekeeper                = int64(65534)
 	uidTrino                     = int64(1000)
 	gidTrino                     = int64(1000)
-	uidSuperset                  = int64(1000)
-	gidSuperset                  = int64(1000)
-	uidRedis                     = int64(999)
-	gidRedis                     = int64(999)
 	uidKeycloak                  = int64(1000)
 	gidKeycloak                  = int64(1000)
 	uidOpenFGA                   = int64(65532)
@@ -173,19 +158,11 @@ const (
 	reasonMissing                = "Missing"
 )
 
-func labelsFor(dp *dataplatformv1alpha1.DataPlatform, component string) map[string]string {
+func labelsFor(dp *dataplatformv1alpha1.DataLake, component string) map[string]string {
 	name := component
 	switch component {
 	case componentTrinoCoordinator, componentTrinoWorker, componentSampleData:
 		name = nameTrino
-	case componentSuperset, componentSupersetPostgres, componentSupersetRedis:
-		if component == componentSupersetPostgres {
-			name = namePostgres
-		} else if component == componentSupersetRedis {
-			name = nameSupersetRedis
-		} else {
-			name = nameSuperset
-		}
 	case componentOpenFGAPostgres:
 		name = namePostgres
 	}
@@ -228,7 +205,7 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func setCondition(dp *dataplatformv1alpha1.DataPlatform, condType string, status metav1.ConditionStatus, reason, message string) {
+func setCondition(dp *dataplatformv1alpha1.DataLake, condType string, status metav1.ConditionStatus, reason, message string) {
 	meta.SetStatusCondition(&dp.Status.Conditions, metav1.Condition{
 		Type:               condType,
 		Status:             status,
@@ -238,13 +215,13 @@ func setCondition(dp *dataplatformv1alpha1.DataPlatform, condType string, status
 	})
 }
 
-func conditionTrue(dp *dataplatformv1alpha1.DataPlatform, condType string) bool {
+func conditionTrue(dp *dataplatformv1alpha1.DataLake, condType string) bool {
 	return meta.IsStatusConditionTrue(dp.Status.Conditions, condType)
 }
 
-func (r *DataPlatformReconciler) apply(
+func (r *DataLakeReconciler) apply(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	obj client.Object,
 	mutate func() error,
 ) error {
@@ -257,9 +234,9 @@ func (r *DataPlatformReconciler) apply(
 	return err
 }
 
-func (r *DataPlatformReconciler) ensureGeneratedSecret(
+func (r *DataLakeReconciler) ensureGeneratedSecret(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	name, namespace string,
 	component string,
 	data map[string][]byte,
@@ -288,7 +265,7 @@ func (r *DataPlatformReconciler) ensureGeneratedSecret(
 	return r.Create(ctx, secret)
 }
 
-func (r *DataPlatformReconciler) getSecretData(ctx context.Context, name, namespace, key string) (string, error) {
+func (r *DataLakeReconciler) getSecretData(ctx context.Context, name, namespace, key string) (string, error) {
 	secret := &corev1.Secret{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, secret); err != nil {
 		return "", err
@@ -331,8 +308,8 @@ func restrictedContainerSecurity(uid, gid int64) *corev1.SecurityContext {
 	return sc
 }
 
-func (r *DataPlatformReconciler) patchStatus(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) error {
-	latest := &dataplatformv1alpha1.DataPlatform{}
+func (r *DataLakeReconciler) patchStatus(ctx context.Context, dp *dataplatformv1alpha1.DataLake) error {
+	latest := &dataplatformv1alpha1.DataLake{}
 	if err := r.Get(ctx, types.NamespacedName{Name: dp.Name}, latest); err != nil {
 		return err
 	}

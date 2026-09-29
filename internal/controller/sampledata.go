@@ -40,9 +40,9 @@ const (
 	gidSampleData       = int64(65532)
 )
 
-func (r *DataPlatformReconciler) reconcileSampleData(
+func (r *DataLakeReconciler) reconcileSampleData(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	oidc oidcConfig,
 ) (bool, error) {
 	if !dp.Spec.Trino.IsEnabled() || !dp.Spec.Lakekeeper.IsEnabled() || !dp.Spec.SampleData.IsEnabled() {
@@ -85,7 +85,7 @@ func (r *DataPlatformReconciler) reconcileSampleData(
 		return false, err
 	}
 
-	needsOAuth := trinoOAuthEnabled(oidc, dp.Spec.Trino.PublicURL, dp.Spec.Superset.IsEnabled())
+	needsOAuth := trinoOAuthEnabled(oidc)
 	ready, err := r.ensureSampleDataJob(ctx, dp, ns, cmHash, oidc, needsOAuth)
 	if err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionSampleDataReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -100,9 +100,9 @@ func (r *DataPlatformReconciler) reconcileSampleData(
 	return false, nil
 }
 
-func (r *DataPlatformReconciler) ensureSampleDataJob(
+func (r *DataLakeReconciler) ensureSampleDataJob(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns, cmHash string,
 	oidc oidcConfig,
 	needsOAuth bool,
@@ -203,7 +203,7 @@ func (r *DataPlatformReconciler) ensureSampleDataJob(
 	return false, nil
 }
 
-func (r *DataPlatformReconciler) ensureSampleDataOIDCSecret(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, trinoNS string) error {
+func (r *DataLakeReconciler) ensureSampleDataOIDCSecret(ctx context.Context, dp *dataplatformv1alpha1.DataLake, trinoNS string) error {
 	kcNS := dp.Spec.Auth.Keycloak.NamespaceOrDefault()
 	password, err := r.getSecretData(ctx, secretKeycloakAdmin, kcNS, keyKeycloakAdminPassword)
 	if err != nil {

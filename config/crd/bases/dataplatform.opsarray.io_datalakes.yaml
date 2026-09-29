@@ -1,0 +1,1458 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: datalakes.dataplatform.opsarray.io
+spec:
+  group: dataplatform.opsarray.io
+  names:
+    kind: DataLake
+    listKind: DataLakeList
+    plural: datalakes
+    singular: datalake
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.lakekeeperEndpoint
+      name: Lakekeeper
+      type: string
+    - jsonPath: .status.trinoEndpoint
+      name: Trino
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: DataLake is the Schema for the datalakes API.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of DataLake
+            properties:
+              auth:
+                description: |-
+                  auth configures OIDC. By default the operator deploys Keycloak for local
+                  use. Set embedded to false and fill oidc to use Okta, JumpCloud, or another IdP.
+                properties:
+                  embedded:
+                    description: embedded deploys Keycloak in its own namespace. Defaults
+                      to true when auth is enabled.
+                    type: boolean
+                  enabled:
+                    description: |-
+                      enabled turns on OIDC for LakeKeeper, OpenFGA clients, the Trino Iceberg
+                      catalog, and the Trino coordinator. The Web UI uses OAuth only when
+                      spec.trino.publicURL is set. Defaults to true.
+                    type: boolean
+                  keycloak:
+                    description: |-
+                      keycloak configures the operator-managed Keycloak instance.
+                      The imported realm includes groups platform-admins, data-engineers, and
+                      analysts. Add a user to a group to grant the matching LakeKeeper role on
+                      the default warehouse.
+                    properties:
+                      image:
+                        description: image is the Keycloak container image.
+                        type: string
+                      namespace:
+                        description: namespace defaults to "keycloak". Use a unique
+                          value if you create multiple DataLakes.
+                        type: string
+                      publicURL:
+                        description: |-
+                          publicURL is the Keycloak URL browsers use (for example https://keycloak.example.com).
+                          When set, Keycloak advertises this hostname (and trusts X-Forwarded-* from an ingress).
+                          LakeKeeper's UI redirect uses this issuer; in-cluster services still use cluster DNS.
+                        type: string
+                      realm:
+                        description: realm is imported on first start. Defaults to
+                          "dataplatform".
+                        type: string
+                      resources:
+                        description: resources are compute resource requirements for
+                          the Keycloak container.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  oidc:
+                    description: oidc is required when embedded is false.
+                    properties:
+                      audience:
+                        description: audience is the expected JWT aud claim. Defaults
+                          to "lakekeeper".
+                        type: string
+                      clientID:
+                        description: |-
+                          clientID is the OIDC client used by the LakeKeeper UI and, unless overridden
+                          in the credentials Secret, by Trino and the operator.
+                        type: string
+                      credentialsSecretRef:
+                        description: |-
+                          credentialsSecretRef locates the client secret (and optional per-component client IDs).
+                          Namespace is required because DataLake is cluster-scoped.
+                        properties:
+                          clientIDKey:
+                            description: clientIDKey, if set, overrides spec.auth.oidc.clientID
+                              from the Secret.
+                            type: string
+                          clientSecretKey:
+                            default: clientSecret
+                            description: clientSecretKey is the Secret key for the
+                              client secret.
+                            type: string
+                          name:
+                            description: name of the Secret.
+                            type: string
+                          namespace:
+                            description: namespace of the Secret.
+                            type: string
+                          supersetClientIDKey:
+                            description: |-
+                              supersetClientIDKey, if set, reads the analytics operator's Superset client id
+                              from this Secret. The embedded realm always provisions that client.
+                            type: string
+                          supersetClientSecretKey:
+                            description: supersetClientSecretKey, if set, reads the
+                              Superset client secret from this Secret.
+                            type: string
+                          trinoClientIDKey:
+                            description: trinoClientIDKey, if set, uses a separate
+                              confidential client for Trino.
+                            type: string
+                          trinoClientSecretKey:
+                            description: trinoClientSecretKey, if set, uses a separate
+                              secret for the Trino client.
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      issuer:
+                        description: |-
+                          issuer is the OIDC issuer URL (no trailing slash).
+                          Example (Okta): https://example.okta.com/oauth2/default
+                          Example (JumpCloud / Keycloak): https://idp.example.com/realms/company
+                        minLength: 1
+                        type: string
+                      scope:
+                        description: scope is requested during the client-credentials
+                          grant. Defaults to "lakekeeper".
+                        type: string
+                      tokenEndpoint:
+                        description: |-
+                          tokenEndpoint is the OAuth2 token URL. Defaults to issuer + "/protocol/openid-connect/token"
+                          (Keycloak / JumpCloud). Okta typically needs "/v1/token" on the authorization server.
+                        type: string
+                    required:
+                    - issuer
+                    type: object
+                type: object
+              authz:
+                description: |-
+                  authz configures fine-grained authorization. By default the operator deploys
+                  OpenFGA and an OPA bridge so Trino enforces LakeKeeper permissions.
+                properties:
+                  columnAccess:
+                    description: |-
+                      columnAccess restricts which columns each user sees in Trino. LakeKeeper
+                      grants access to whole tables; these entries hide a column's values
+                      unless the user holds the named relation on the column's OpenFGA object.
+
+                      The default object id is "{catalog}.{schema}.{table}.{column}", so
+                      "user:alice viewer column:lakekeeper.sales.orders.ssn" reveals ssn.
+                      Set openfga.object to share one grant across tables, for example "ssn".
+
+                      Users without a grant see the mask expression (NULL by default). The
+                      column still appears in the schema; its values do not. Fails closed:
+                      an unreachable OpenFGA masks every restricted column.
+                    items:
+                      description: ColumnAccessSpec hides one Trino column from users
+                        who lack an OpenFGA grant.
+                      properties:
+                        catalog:
+                          description: |-
+                            catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
+                            the catalog the operator creates for the managed warehouse.
+                          type: string
+                        column:
+                          description: |-
+                            column is the column to hide. It must match the column's case as stored
+                            in the table, which Iceberg normally lowercases.
+                          pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                          type: string
+                        mask:
+                          description: |-
+                            mask is the SQL expression Trino substitutes for the column when the
+                            user has no grant. Defaults to NULL. This value is taken from the CR,
+                            not from OpenFGA, and is applied as a view expression.
+                          maxLength: 256
+                          type: string
+                        openfga:
+                          description: |-
+                            openfga names the object type and relation that grant an unmasked view
+                            of this column.
+                          properties:
+                            object:
+                              description: |-
+                                object is the OpenFGA object id. Defaults to
+                                "{catalog}.{schema}.{table}.{column}". Set this to a short name such as
+                                "ssn" to grant that column on every table that uses the same type.
+                              pattern: ^[a-zA-Z0-9._|-]+$
+                              type: string
+                            relation:
+                              description: |-
+                                relation is the relation a user must hold to see the column unmasked.
+                                Defaults to "viewer". Assignable to users and to group members.
+                              pattern: ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$
+                              type: string
+                            type:
+                              description: |-
+                                type is the OpenFGA object type. Combined with object, this is the
+                                tuple target, for example "column:lakekeeper.sales.orders.ssn".
+                              pattern: ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        schema:
+                          description: schema is the Trino schema, which is a LakeKeeper
+                            namespace.
+                          minLength: 1
+                          type: string
+                        table:
+                          description: table is the table holding the column.
+                          minLength: 1
+                          type: string
+                      required:
+                      - column
+                      - openfga
+                      - schema
+                      - table
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  embedded:
+                    description: embedded deploys OpenFGA in its own namespace. Defaults
+                      to true when authz is enabled.
+                    type: boolean
+                  enabled:
+                    description: |-
+                      enabled deploys OpenFGA and uses it as LakeKeeper's authorizer.
+                      Defaults to true.
+                    type: boolean
+                  openfga:
+                    description: openfga configures the operator-managed OpenFGA instance
+                      and the OPA bridge.
+                    properties:
+                      image:
+                        description: image is the OpenFGA container image.
+                        type: string
+                      namespace:
+                        description: namespace defaults to "openfga". Use a unique
+                          value if you create multiple DataLakes.
+                        type: string
+                      opaImage:
+                        description: opaImage is the Open Policy Agent image that
+                          translates Trino checks to LakeKeeper.
+                        type: string
+                      postgres:
+                        description: postgres is OpenFGA's metadata database.
+                        properties:
+                          credentialsSecretRef:
+                            description: credentialsSecretRef locates username/password
+                              for an external database.
+                            properties:
+                              name:
+                                description: name of the Secret.
+                                type: string
+                              namespace:
+                                description: namespace of the Secret. Defaults to
+                                  the LakeKeeper namespace.
+                                type: string
+                              passwordKey:
+                                default: password
+                                description: passwordKey is the Secret key for the
+                                  database password.
+                                type: string
+                              usernameKey:
+                                default: username
+                                description: usernameKey is the Secret key for the
+                                  database user.
+                                type: string
+                            required:
+                            - name
+                            type: object
+                          database:
+                            description: database name.
+                            type: string
+                          embedded:
+                            description: |-
+                              embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+                              Defaults to true. Set false and fill host/credentials for an external database.
+                            type: boolean
+                          host:
+                            description: host is required when embedded is false.
+                            type: string
+                          image:
+                            description: image is used when embedded is true.
+                            type: string
+                          port:
+                            description: port of the external database.
+                            format: int32
+                            type: integer
+                          sslMode:
+                            description: sslMode is passed to the Postgres driver
+                              (disable, prefer, require, ...).
+                            type: string
+                          storageSize:
+                            description: storageSize is the PVC size for embedded
+                              Postgres.
+                            type: string
+                        type: object
+                      resources:
+                        description: resources are compute resource requirements for
+                          the OpenFGA container.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      rowFilterStore:
+                        description: |-
+                          rowFilterStore is the OpenFGA store holding row-filter and column-access
+                          tuples. Defaults to "rowfilters". It is deliberately separate from store,
+                          because LakeKeeper migrates the authorization model in its own store.
+                        type: string
+                      store:
+                        description: store is the OpenFGA store name LakeKeeper uses.
+                          Defaults to "lakekeeper".
+                        type: string
+                    type: object
+                  rowFilters:
+                    description: |-
+                      rowFilters restrict which rows each user sees in Trino. LakeKeeper grants
+                      access to whole tables; these entries narrow a granted table down to the
+                      rows whose key column holds a value the user may see.
+
+                      Each entry pins one table to one column, and names the OpenFGA object type
+                      whose members are that column's permitted values. The operator provisions
+                      the types in a dedicated OpenFGA store; write the user-to-value tuples
+                      yourself, for example "user:alice viewer region:emea".
+
+                      Requires Trino and authz to be enabled. A table with no reachable
+                      permitted values returns no rows.
+                    items:
+                      description: RowFilterSpec restricts one Trino table to the
+                        rows a user is allowed to see.
+                      properties:
+                        catalog:
+                          description: |-
+                            catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
+                            the catalog the operator creates for the managed warehouse.
+                          type: string
+                        column:
+                          description: |-
+                            column is the column whose value decides whether a row is visible. It is
+                            emitted as a quoted identifier, so it must match the column's case as
+                            stored in the table, which Iceberg normally lowercases.
+                          pattern: ^[A-Za-z_][A-Za-z0-9_]*$
+                          type: string
+                        numeric:
+                          description: |-
+                            numeric compares the column against unquoted SQL literals, for integer
+                            and decimal columns. Defaults to false, which emits quoted strings.
+                            Non-numeric values are dropped from a numeric filter.
+                          type: boolean
+                        openfga:
+                          description: openfga names the object type and relation
+                            that hold the permitted values.
+                          properties:
+                            relation:
+                              description: |-
+                                relation is the relation a user must hold on a value object. Defaults to
+                                "viewer". The operator defines it as assignable to users and to group
+                                members, so tuples may target "user:alice" or "group:analysts#member".
+                              pattern: ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$
+                              type: string
+                            type:
+                              description: |-
+                                type is the OpenFGA object type. Object ids under this type are matched
+                                against the column, so "region:emea" permits the value "emea".
+                              pattern: ^[a-zA-Z0-9_][a-zA-Z0-9_-]*$
+                              type: string
+                          required:
+                          - type
+                          type: object
+                        schema:
+                          description: schema is the Trino schema, which is a LakeKeeper
+                            namespace.
+                          minLength: 1
+                          type: string
+                        table:
+                          description: table is the table to filter.
+                          minLength: 1
+                          type: string
+                      required:
+                      - column
+                      - openfga
+                      - schema
+                      - table
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                type: object
+              lakekeeper:
+                description: lakekeeper configures the Iceberg REST catalog.
+                properties:
+                  enabled:
+                    description: enabled deploys LakeKeeper. Defaults to true.
+                    type: boolean
+                  extraEnv:
+                    description: extraEnv is appended to the LakeKeeper container
+                      (LAKEKEEPER__* and others).
+                    items:
+                      description: EnvVar represents an environment variable present
+                        in a Container.
+                      properties:
+                        name:
+                          description: |-
+                            Name of the environment variable.
+                            May consist of any printable ASCII characters except '='.
+                          type: string
+                        value:
+                          description: |-
+                            Variable references $(VAR_NAME) are expanded
+                            using the previously defined environment variables in the container and
+                            any service environment variables. If a variable cannot be resolved,
+                            the reference in the input string will be unchanged. Double $$ are reduced
+                            to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                            "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                            Escaped references will never be expanded, regardless of whether the variable
+                            exists or not.
+                            Defaults to "".
+                          type: string
+                        valueFrom:
+                          description: Source for the environment variable's value.
+                            Cannot be used if value is not empty.
+                          properties:
+                            configMapKeyRef:
+                              description: Selects a key of a ConfigMap.
+                              properties:
+                                key:
+                                  description: The key to select.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the ConfigMap or its
+                                    key must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            fieldRef:
+                              description: |-
+                                Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                                spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                              properties:
+                                apiVersion:
+                                  description: Version of the schema the FieldPath
+                                    is written in terms of, defaults to "v1".
+                                  type: string
+                                fieldPath:
+                                  description: Path of the field to select in the
+                                    specified API version.
+                                  type: string
+                              required:
+                              - fieldPath
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            fileKeyRef:
+                              description: |-
+                                FileKeyRef selects a key of the env file.
+                                Requires the EnvFiles feature gate to be enabled.
+                              properties:
+                                key:
+                                  description: |-
+                                    The key within the env file. An invalid key will prevent the pod from starting.
+                                    The keys defined within a source may consist of any printable ASCII characters except '='.
+                                    During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                                  type: string
+                                optional:
+                                  default: false
+                                  description: |-
+                                    Specify whether the file or its key must be defined. If the file or key
+                                    does not exist, then the env var is not published.
+                                    If optional is set to true and the specified key does not exist,
+                                    the environment variable will not be set in the Pod's containers.
+
+                                    If optional is set to false and the specified key does not exist,
+                                    an error will be returned during Pod creation.
+                                  type: boolean
+                                path:
+                                  description: |-
+                                    The path within the volume from which to select the file.
+                                    Must be relative and may not contain the '..' path or start with '..'.
+                                  type: string
+                                volumeName:
+                                  description: The name of the volume mount containing
+                                    the env file.
+                                  type: string
+                              required:
+                              - key
+                              - path
+                              - volumeName
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            resourceFieldRef:
+                              description: |-
+                                Selects a resource of the container: only resources limits and requests
+                                (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                              properties:
+                                containerName:
+                                  description: 'Container name: required for volumes,
+                                    optional for env vars'
+                                  type: string
+                                divisor:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Specifies the output format of the
+                                    exposed resources, defaults to "1"
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                                resource:
+                                  description: 'Required: resource to select'
+                                  type: string
+                              required:
+                              - resource
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            secretKeyRef:
+                              description: Selects a key of a secret in the pod's
+                                namespace
+                              properties:
+                                key:
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          type: object
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  image:
+                    description: image is the LakeKeeper container image.
+                    type: string
+                  namespace:
+                    description: |-
+                      namespace is the Kubernetes namespace for LakeKeeper (and embedded Postgres).
+                      Defaults to "lakekeeper". Use a unique value if you create multiple DataLakes.
+                    type: string
+                  postgres:
+                    description: postgres is the catalog metadata database.
+                    properties:
+                      credentialsSecretRef:
+                        description: credentialsSecretRef locates username/password
+                          for an external database.
+                        properties:
+                          name:
+                            description: name of the Secret.
+                            type: string
+                          namespace:
+                            description: namespace of the Secret. Defaults to the
+                              LakeKeeper namespace.
+                            type: string
+                          passwordKey:
+                            default: password
+                            description: passwordKey is the Secret key for the database
+                              password.
+                            type: string
+                          usernameKey:
+                            default: username
+                            description: usernameKey is the Secret key for the database
+                              user.
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      database:
+                        description: database name.
+                        type: string
+                      embedded:
+                        description: |-
+                          embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+                          Defaults to true. Set false and fill host/credentials for an external database.
+                        type: boolean
+                      host:
+                        description: host is required when embedded is false.
+                        type: string
+                      image:
+                        description: image is used when embedded is true.
+                        type: string
+                      port:
+                        description: port of the external database.
+                        format: int32
+                        type: integer
+                      sslMode:
+                        description: sslMode is passed to the Postgres driver (disable,
+                          prefer, require, ...).
+                        type: string
+                      storageSize:
+                        description: storageSize is the PVC size for embedded Postgres.
+                        type: string
+                    type: object
+                  publicURL:
+                    description: |-
+                      publicURL is the LakeKeeper URL browsers use (for example https://lakekeeper.example.com).
+                      When set, the UI advertises this origin. In-cluster clients still use cluster DNS.
+                    type: string
+                  replicas:
+                    description: replicas is the number of LakeKeeper pods.
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  resources:
+                    description: resources are compute resource requirements for the
+                      catalog container.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  warehouse:
+                    description: warehouse is created via the LakeKeeper management
+                      API after bootstrap.
+                    properties:
+                      keyPrefix:
+                        description: keyPrefix is an optional path inside the bucket.
+                        type: string
+                      name:
+                        description: name is the warehouse identifier engines use
+                          in iceberg.rest-catalog.warehouse.
+                        type: string
+                    type: object
+                type: object
+              sampleData:
+                description: |-
+                  sampleData seeds a demo Iceberg schema with a few tables and rows once
+                  Trino and the warehouse are ready, so you can try queries immediately.
+                properties:
+                  enabled:
+                    description: |-
+                      enabled creates schema sales with sample orders/invoices tables once Trino
+                      and the warehouse are ready. Defaults to true when Trino is enabled.
+                      Requires embedded Keycloak (or auth disabled) so the seed Job can authenticate.
+                    type: boolean
+                  image:
+                    description: |-
+                      image is the container image used by the one-shot seed Job.
+                      Defaults to python:3.12-alpine.
+                    type: string
+                  schema:
+                    description: schema is the Trino/Iceberg schema (namespace) name.
+                      Defaults to "sales".
+                    type: string
+                type: object
+              storage:
+                description: |-
+                  storage configures the object store used by the Iceberg warehouse.
+                  Required when LakeKeeper is enabled.
+                properties:
+                  embedded:
+                    description: embedded deploys MinIO in its own namespace. Defaults
+                      to true.
+                    type: boolean
+                  minio:
+                    description: minio configures the operator-managed MinIO instance.
+                    properties:
+                      bucket:
+                        description: bucket is created in MinIO if it does not exist.
+                        type: string
+                      image:
+                        description: image is the MinIO server image.
+                        type: string
+                      mcImage:
+                        description: mcImage is the MinIO client image used to create
+                          the bucket.
+                        type: string
+                      namespace:
+                        description: namespace defaults to "minio". Use a unique value
+                          if you create multiple DataLakes.
+                        type: string
+                      resources:
+                        description: resources are compute resource requirements for
+                          the MinIO container.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                      storageSize:
+                        description: storageSize is the PVC size.
+                        type: string
+                    type: object
+                  s3:
+                    description: s3 is required when embedded is false.
+                    properties:
+                      bucket:
+                        description: bucket is the S3 bucket name.
+                        minLength: 1
+                        type: string
+                      credentialsSecretRef:
+                        description: |-
+                          credentialsSecretRef points at a Secret with static S3 keys.
+                          Namespace is required because DataLake is cluster-scoped.
+                          Required when using an external store (storage.embedded=false).
+                        properties:
+                          accessKeyIDKey:
+                            default: AWS_ACCESS_KEY_ID
+                            description: accessKeyIDKey is the Secret key for the
+                              access key ID.
+                            type: string
+                          name:
+                            description: name of the Secret.
+                            type: string
+                          namespace:
+                            description: namespace of the Secret.
+                            type: string
+                          secretAccessKeyKey:
+                            default: AWS_SECRET_ACCESS_KEY
+                            description: secretAccessKeyKey is the Secret key for
+                              the secret access key.
+                            type: string
+                        required:
+                        - name
+                        - namespace
+                        type: object
+                      endpoint:
+                        description: endpoint is an optional custom S3 API URL (MinIO,
+                          SeaweedFS, etc.).
+                        type: string
+                      flavor:
+                        default: aws
+                        description: flavor selects the LakeKeeper storage profile.
+                        enum:
+                        - aws
+                        - s3-compat
+                        type: string
+                      pathStyleAccess:
+                        description: pathStyleAccess uses path-style URLs. Required
+                          for many S3-compatible stores.
+                        type: boolean
+                      region:
+                        description: region is the AWS region, or a placeholder such
+                          as "local" for S3-compatible stores.
+                        minLength: 1
+                        type: string
+                      stsEnabled:
+                        description: stsEnabled asks LakeKeeper to vend temporary
+                          credentials to engines.
+                        type: boolean
+                      stsRoleARN:
+                        description: stsRoleARN is the IAM role LakeKeeper assumes
+                          when STS is enabled.
+                        type: string
+                    required:
+                    - bucket
+                    - region
+                    type: object
+                type: object
+              trino:
+                description: trino configures the query engine.
+                properties:
+                  coordinator:
+                    description: coordinator configures the Trino coordinator.
+                    properties:
+                      resources:
+                        description: resources are compute resource requirements for
+                          the coordinator container.
+                        properties:
+                          claims:
+                            description: |-
+                              Claims lists the names of resources, defined in spec.resourceClaims,
+                              that are used by this container.
+
+                              This field depends on the
+                              DynamicResourceAllocation feature gate.
+
+                              This field is immutable. It can only be set for containers.
+                            items:
+                              description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                              properties:
+                                name:
+                                  description: |-
+                                    Name must match the name of one entry in pod.spec.resourceClaims of
+                                    the Pod where this field is used. It makes that resource available
+                                    inside a container.
+                                  type: string
+                                request:
+                                  description: |-
+                                    Request is the name chosen for a request in the referenced claim.
+                                    If empty, everything from the claim is made available, otherwise
+                                    only the result of this request.
+                                  type: string
+                              required:
+                              - name
+                              type: object
+                            type: array
+                            x-kubernetes-list-map-keys:
+                            - name
+                            x-kubernetes-list-type: map
+                          limits:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Limits describes the maximum amount of compute resources allowed.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                          requests:
+                            additionalProperties:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            description: |-
+                              Requests describes the minimum amount of compute resources required.
+                              If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                              otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                              More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                            type: object
+                        type: object
+                    type: object
+                  enabled:
+                    description: enabled deploys Trino. Defaults to true.
+                    type: boolean
+                  extraCatalogs:
+                    additionalProperties:
+                      type: string
+                    description: extraCatalogs adds extra files under etc/catalog.
+                      The "lakekeeper" catalog is reserved.
+                    type: object
+                  extraConfig:
+                    additionalProperties:
+                      type: string
+                    description: extraConfig is merged into config.properties (key=value).
+                    type: object
+                  extraEnv:
+                    description: extraEnv is appended to Trino containers.
+                    items:
+                      description: EnvVar represents an environment variable present
+                        in a Container.
+                      properties:
+                        name:
+                          description: |-
+                            Name of the environment variable.
+                            May consist of any printable ASCII characters except '='.
+                          type: string
+                        value:
+                          description: |-
+                            Variable references $(VAR_NAME) are expanded
+                            using the previously defined environment variables in the container and
+                            any service environment variables. If a variable cannot be resolved,
+                            the reference in the input string will be unchanged. Double $$ are reduced
+                            to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                            "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                            Escaped references will never be expanded, regardless of whether the variable
+                            exists or not.
+                            Defaults to "".
+                          type: string
+                        valueFrom:
+                          description: Source for the environment variable's value.
+                            Cannot be used if value is not empty.
+                          properties:
+                            configMapKeyRef:
+                              description: Selects a key of a ConfigMap.
+                              properties:
+                                key:
+                                  description: The key to select.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the ConfigMap or its
+                                    key must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            fieldRef:
+                              description: |-
+                                Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                                spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                              properties:
+                                apiVersion:
+                                  description: Version of the schema the FieldPath
+                                    is written in terms of, defaults to "v1".
+                                  type: string
+                                fieldPath:
+                                  description: Path of the field to select in the
+                                    specified API version.
+                                  type: string
+                              required:
+                              - fieldPath
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            fileKeyRef:
+                              description: |-
+                                FileKeyRef selects a key of the env file.
+                                Requires the EnvFiles feature gate to be enabled.
+                              properties:
+                                key:
+                                  description: |-
+                                    The key within the env file. An invalid key will prevent the pod from starting.
+                                    The keys defined within a source may consist of any printable ASCII characters except '='.
+                                    During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                                  type: string
+                                optional:
+                                  default: false
+                                  description: |-
+                                    Specify whether the file or its key must be defined. If the file or key
+                                    does not exist, then the env var is not published.
+                                    If optional is set to true and the specified key does not exist,
+                                    the environment variable will not be set in the Pod's containers.
+
+                                    If optional is set to false and the specified key does not exist,
+                                    an error will be returned during Pod creation.
+                                  type: boolean
+                                path:
+                                  description: |-
+                                    The path within the volume from which to select the file.
+                                    Must be relative and may not contain the '..' path or start with '..'.
+                                  type: string
+                                volumeName:
+                                  description: The name of the volume mount containing
+                                    the env file.
+                                  type: string
+                              required:
+                              - key
+                              - path
+                              - volumeName
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            resourceFieldRef:
+                              description: |-
+                                Selects a resource of the container: only resources limits and requests
+                                (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                              properties:
+                                containerName:
+                                  description: 'Container name: required for volumes,
+                                    optional for env vars'
+                                  type: string
+                                divisor:
+                                  anyOf:
+                                  - type: integer
+                                  - type: string
+                                  description: Specifies the output format of the
+                                    exposed resources, defaults to "1"
+                                  pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                  x-kubernetes-int-or-string: true
+                                resource:
+                                  description: 'Required: resource to select'
+                                  type: string
+                              required:
+                              - resource
+                              type: object
+                              x-kubernetes-map-type: atomic
+                            secretKeyRef:
+                              description: Selects a key of a secret in the pod's
+                                namespace
+                              properties:
+                                key:
+                                  description: The key of the secret to select from.  Must
+                                    be a valid secret key.
+                                  type: string
+                                name:
+                                  default: ""
+                                  description: |-
+                                    Name of the referent.
+                                    This field is effectively required, but due to backwards compatibility is
+                                    allowed to be empty. Instances of this type with an empty value here are
+                                    almost certainly wrong.
+                                    More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                  type: string
+                                optional:
+                                  description: Specify whether the Secret or its key
+                                    must be defined
+                                  type: boolean
+                              required:
+                              - key
+                              type: object
+                              x-kubernetes-map-type: atomic
+                          type: object
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  image:
+                    description: image is the Trino container image.
+                    type: string
+                  namespace:
+                    description: |-
+                      namespace is the Kubernetes namespace for Trino.
+                      Defaults to "trino". Use a unique value if you create multiple DataLakes.
+                    type: string
+                  publicURL:
+                    description: |-
+                      publicURL is the Trino URL browsers use (for example https://trino.example.com).
+                      When set and auth is enabled, the coordinator Web UI uses OIDC (OAuth2).
+                    type: string
+                  resources:
+                    description: resources are compute resource requirements for worker
+                      pods.
+                    properties:
+                      claims:
+                        description: |-
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
+                        description: |-
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                    type: object
+                  service:
+                    description: service exposes the coordinator.
+                    properties:
+                      type:
+                        default: ClusterIP
+                        description: type is the Service type.
+                        type: string
+                    type: object
+                  workers:
+                    description: workers is the number of Trino worker pods. Zero
+                      runs a coordinator-only cluster.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                type: object
+            type: object
+          status:
+            description: status defines the observed state of DataLake
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the DataLake resource.
+
+                  Standard condition types include:
+                  - "Ready": every enabled component is fully functional
+                  - "MinioReady": in-cluster MinIO is ready, or an external object store is configured
+                  - "AuthReady": Keycloak is ready, an external OIDC issuer is configured, or auth is disabled
+                  - "OpenFGAReady": OpenFGA is ready, or authorization is disabled
+                  - "PostgresReady": the catalog database is usable
+                  - "LakekeeperReady": the catalog Deployment is ready
+                  - "WarehouseReady": the Iceberg warehouse has been created
+                  - "TrinoReady": the Trino coordinator is ready
+                  - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
+
+                  The status of each condition is one of True, False, or Unknown.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              keycloakEndpoint:
+                description: keycloakEndpoint is the in-cluster HTTP URL of Keycloak
+                  when it is embedded.
+                type: string
+              lakekeeperEndpoint:
+                description: lakekeeperEndpoint is the in-cluster HTTP URL of the
+                  catalog.
+                type: string
+              minioEndpoint:
+                description: minioEndpoint is the in-cluster S3 API URL when MinIO
+                  is embedded.
+                type: string
+              openfgaEndpoint:
+                description: openfgaEndpoint is the in-cluster gRPC URL of OpenFGA
+                  when it is embedded.
+                type: string
+              rowFilterStoreID:
+                description: |-
+                  rowFilterStoreID is the OpenFGA store id the operator provisioned for row
+                  filters and column access. Use it when writing tuples against the OpenFGA
+                  API.
+                type: string
+              trinoEndpoint:
+                description: trinoEndpoint is the in-cluster HTTP URL of the Trino
+                  coordinator.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -1,6 +1,6 @@
 # Configuration for the operator's Trino row filters.
 #
-# Everything is read from the environment so that a change to a DataPlatform's
+# Everything is read from the environment so that a change to a DataLake's
 # spec.authz.rowFilters rolls the OPA Deployment and takes effect immediately.
 # A ConfigMap would not, because OPA is not started with --watch.
 

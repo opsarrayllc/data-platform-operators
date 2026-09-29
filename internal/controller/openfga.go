@@ -48,7 +48,7 @@ type openfgaConfig struct {
 	rowFilterStoreID string
 }
 
-func (r *DataPlatformReconciler) reconcileAuthz(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) (openfgaConfig, bool, error) {
+func (r *DataLakeReconciler) reconcileAuthz(ctx context.Context, dp *dataplatformv1alpha1.DataLake) (openfgaConfig, bool, error) {
 	if !dp.Spec.Authz.IsEnabled() {
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionTrue, reasonDisabled, "Authorization is disabled")
 		return openfgaConfig{}, true, nil
@@ -61,7 +61,7 @@ func (r *DataPlatformReconciler) reconcileAuthz(ctx context.Context, dp *datapla
 	return r.reconcileOpenFGA(ctx, dp)
 }
 
-func (r *DataPlatformReconciler) reconcileOpenFGA(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) (openfgaConfig, bool, error) {
+func (r *DataLakeReconciler) reconcileOpenFGA(ctx context.Context, dp *dataplatformv1alpha1.DataLake) (openfgaConfig, bool, error) {
 	spec := dp.Spec.Authz.OpenFGA
 	ns := spec.NamespaceOrDefault()
 	dp.Status.OpenFGAEndpoint = clusterServiceURL(nameOpenFGA, ns, openfgaGRPCPort)
@@ -136,9 +136,9 @@ func (r *DataPlatformReconciler) reconcileOpenFGA(ctx context.Context, dp *datap
 // reconcileAccessStore provisions the OpenFGA store and authorization model
 // backing spec.authz.rowFilters and spec.authz.columnAccess, and returns its
 // store id.
-func (r *DataPlatformReconciler) reconcileAccessStore(
+func (r *DataLakeReconciler) reconcileAccessStore(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns, apiKey string,
 ) (string, error) {
 	log := logf.FromContext(ctx)
@@ -186,7 +186,7 @@ func accessAuthzTypes(spec dataplatformv1alpha1.AuthzSpec) []AuthzType {
 	return types
 }
 
-func (r *DataPlatformReconciler) ensureOpenFGASecrets(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) ensureOpenFGASecrets(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	apiKey, err := randomHex(32)
 	if err != nil {
 		return err
@@ -207,9 +207,9 @@ func (r *DataPlatformReconciler) ensureOpenFGASecrets(ctx context.Context, dp *d
 	})
 }
 
-func (r *DataPlatformReconciler) applyOpenFGAPostgres(
+func (r *DataLakeReconciler) applyOpenFGAPostgres(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.PostgresSpec,
 ) error {
@@ -282,7 +282,7 @@ func (r *DataPlatformReconciler) applyOpenFGAPostgres(
 	})
 }
 
-func (r *DataPlatformReconciler) applyOpenFGAService(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) applyOpenFGAService(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameOpenFGA, Namespace: ns}}
 	labels := labelsFor(dp, componentOpenFGA)
 	return r.apply(ctx, dp, svc, func() error {
@@ -296,9 +296,9 @@ func (r *DataPlatformReconciler) applyOpenFGAService(ctx context.Context, dp *da
 	})
 }
 
-func (r *DataPlatformReconciler) applyOpenFGADeployment(
+func (r *DataLakeReconciler) applyOpenFGADeployment(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.OpenFGASpec,
 ) error {

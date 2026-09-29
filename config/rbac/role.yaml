@@ -58,7 +58,7 @@ rules:
 - apiGroups:
   - dataplatform.opsarray.io
   resources:
-  - dataplatforms
+  - datalakes
   verbs:
   - create
   - delete
@@ -70,13 +70,13 @@ rules:
 - apiGroups:
   - dataplatform.opsarray.io
   resources:
-  - dataplatforms/finalizers
+  - datalakes/finalizers
   verbs:
   - update
 - apiGroups:
   - dataplatform.opsarray.io
   resources:
-  - dataplatforms/status
+  - datalakes/status
   verbs:
   - get
   - patch

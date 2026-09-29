@@ -1,0 +1,21 @@
+apiVersion: v2
+name: data-lake-operator
+description: Kubernetes operator that deploys the resources needed to bootstrap a data lake
+type: application
+
+# Chart version. Bump on any change to the chart itself.
+version: 0.1.0
+
+# Version of the operator this chart deploys by default. The release workflow
+# overwrites this with the tag being released, and it is the default image tag.
+appVersion: "0.1.0"
+
+home: https://github.com/opsarrayllc/data-lake-operator
+sources:
+  - https://github.com/opsarrayllc/data-lake-operator
+keywords:
+  - operator
+  - data-platform
+  - kubebuilder
+
+kubeVersion: ">=1.25.0-0"

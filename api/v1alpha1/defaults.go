@@ -116,26 +116,6 @@ func (s *TrinoSpec) WorkersOrDefault() int32 {
 	return int32OrDefault(s.Workers, 0)
 }
 
-// IsEnabled reports whether Superset should be deployed. Nil defaults to true.
-func (s *SupersetSpec) IsEnabled() bool {
-	return boolDefaultTrue(s.Enabled)
-}
-
-// NamespaceOrDefault returns the Superset namespace.
-func (s *SupersetSpec) NamespaceOrDefault() string {
-	return stringOrDefault(s.Namespace, DefaultSupersetNamespace)
-}
-
-// ImageOrDefault returns the Superset image.
-func (s *SupersetSpec) ImageOrDefault() string {
-	return stringOrDefault(s.Image, DefaultSupersetImage)
-}
-
-// ImageOrDefault returns the Redis image used by Superset.
-func (s *SupersetRedisSpec) ImageOrDefault() string {
-	return stringOrDefault(s.Image, DefaultRedisImage)
-}
-
 // TypeOrDefault returns the Service type.
 func (s *ServiceSpec) TypeOrDefault() corev1.ServiceType {
 	if s.Type == "" {

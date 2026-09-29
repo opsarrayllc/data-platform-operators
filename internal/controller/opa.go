@@ -32,7 +32,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileOPA(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig, fga openfgaConfig) (bool, error) {
+func (r *DataLakeReconciler) reconcileOPA(ctx context.Context, dp *dataplatformv1alpha1.DataLake, oidc oidcConfig, fga openfgaConfig) (bool, error) {
 	if !fga.enabled || !oidc.enabled || !dp.Spec.Trino.IsEnabled() {
 		return true, nil
 	}
@@ -52,7 +52,7 @@ func (r *DataPlatformReconciler) reconcileOPA(ctx context.Context, dp *dataplatf
 	return r.deploymentReady(ctx, ns, nameOPA)
 }
 
-func (r *DataPlatformReconciler) applyOPASecret(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string, oidc oidcConfig) error {
+func (r *DataLakeReconciler) applyOPASecret(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string, oidc oidcConfig) error {
 	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretOIDC, Namespace: ns}}
 	labels := labelsFor(dp, componentOPA)
 	return r.apply(ctx, dp, secret, func() error {
@@ -66,7 +66,7 @@ func (r *DataPlatformReconciler) applyOPASecret(ctx context.Context, dp *datapla
 	})
 }
 
-func (r *DataPlatformReconciler) applyOPAPolicies(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) applyOPAPolicies(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapOPAPolicies, Namespace: ns}}
 	labels := labelsFor(dp, componentOPA)
 	return r.apply(ctx, dp, cm, func() error {
@@ -103,7 +103,7 @@ func (r *DataPlatformReconciler) applyOPAPolicies(ctx context.Context, dp *datap
 // The policies travel as environment variables rather than ConfigMap keys
 // because OPA does not run with --watch: a ConfigMap edit would sit unread
 // until the pod restarted, whereas changing the pod's env rolls it.
-func opaAccessEnv(dp *dataplatformv1alpha1.DataPlatform, fga openfgaConfig) []corev1.EnvVar {
+func opaAccessEnv(dp *dataplatformv1alpha1.DataLake, fga openfgaConfig) []corev1.EnvVar {
 	if !dp.Spec.Authz.HasAccessPolicies() {
 		return nil
 	}
@@ -175,7 +175,7 @@ func columnAccessJSON(access []dataplatformv1alpha1.ColumnAccessSpec) string {
 	return string(raw)
 }
 
-func (r *DataPlatformReconciler) applyOPAService(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, ns string) error {
+func (r *DataLakeReconciler) applyOPAService(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameOPA, Namespace: ns}}
 	labels := labelsFor(dp, componentOPA)
 	return r.apply(ctx, dp, svc, func() error {
@@ -190,9 +190,9 @@ func (r *DataPlatformReconciler) applyOPAService(ctx context.Context, dp *datapl
 	})
 }
 
-func (r *DataPlatformReconciler) applyOPADeployment(
+func (r *DataLakeReconciler) applyOPADeployment(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	oidc oidcConfig,
 	fga openfgaConfig,

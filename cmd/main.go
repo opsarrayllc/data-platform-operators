@@ -184,12 +184,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := (&controller.DataPlatformReconciler{
+	if err := (&controller.DataLakeReconciler{
 		Client:  mgr.GetClient(),
 		Scheme:  mgr.GetScheme(),
 		Catalog: catalog,
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "Failed to create controller", "controller", "dataplatform")
+		setupLog.Error(err, "Failed to create controller", "controller", "datalake")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

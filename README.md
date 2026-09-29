@@ -16,12 +16,14 @@ Built with [Kubebuilder](https://book.kubebuilder.io) v4 / controller-runtime.
 
 ## API
 
-| Group | Version | Kind |
-| --- | --- | --- |
-| `dataplatform.opsarray.io` | `v1alpha1` | `DataPlatform` |
+| Group | Version | Kind | Operator |
+| --- | --- | --- | --- |
+| `dataplatform.opsarray.io` | `v1alpha1` | `DataLake` | this module |
+| `dataplatform.opsarray.io` | `v1alpha1` | `Analytics` | [`data-analytics-operator`](data-analytics-operator) |
 
-The type lives in `api/v1alpha1/dataplatform_types.go` and its reconciler in
-`internal/controller/dataplatform_controller.go`.
+`DataLake` deploys the lake (object storage, catalog, Trino, and identity).
+`Analytics` deploys Superset against that Trino. Its type lives in
+`data-analytics-operator/api/v1alpha1/analytics_types.go`.
 
 ## Prerequisites
 
@@ -39,11 +41,12 @@ make manifests generate   # regenerate CRDs, RBAC, and DeepCopy code after editi
 make test                 # unit + envtest suite
 make test-rego            # OPA policy tests (internal/controller/embed)
 make lint                 # golangci-lint
-make build                # compile the manager to bin/manager
-make run                  # run the controller locally against your current kubecontext
+make build                # compile the data lake manager to bin/manager
+make run-data-lake        # run the data lake operator against your current kubecontext
+make run-data-analytics   # run the data analytics operator against your current kubecontext
 ```
 
-`make run` uses your active kubeconfig context, so install the CRDs first:
+Both run targets use your active kubeconfig context, so install the CRDs first:
 
 ```bash
 make install
@@ -82,13 +85,13 @@ helm install data-platform-operator \
 
 The chart version and the operator image tag are released together, so the
 default `image.tag` follows the chart's `appVersion` and you rarely need to set
-it. Chart source lives in `deploy/data-platform-operator`; see its `values.yaml` for
+it. Chart source lives in `deploy/data-lake-operator`; see its `values.yaml` for
 the full set of options. Notable ones:
 
 | Value | Default | Purpose |
 | --- | --- | --- |
-| `crds.enabled` | `true` | Install the `DataPlatform` CRD with the release |
-| `crds.keep` | `true` | Keep the CRD (and all `DataPlatform`s) on uninstall |
+| `crds.enabled` | `true` | Install the `DataLake` CRD with the release |
+| `crds.keep` | `true` | Keep the CRD (and all `DataLake`s) on uninstall |
 | `metrics.secure` | `true` | Serve metrics over HTTPS with authn/authz |
 | `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` |
 | `replicaCount` | `1` | Extra replicas are standbys; leader election picks one |
@@ -136,11 +139,11 @@ Tokens include a `groups` claim. Finer grants (a namespace, a table, a region)
 still go through LakeKeeper's UI or OpenFGA tuples; the groups are the starting
 set of personas, not a replacement for those APIs.
 
-Superset maps the same groups to FAB roles (`platform-admins` → Admin,
+The analytics operator maps the same groups to Superset roles (`platform-admins` → Admin,
 `data-engineers` → Alpha, `analysts` → Gamma). Charts and SQL Lab query Trino
 with a per-user OAuth2 token, so catalog, row-filter, and column-mask policies
 still apply. The first Trino query after login may prompt a one-time Keycloak
-consent; a future Superset release may reuse the login token and skip that step.
+consent.
 
 ## Row-level access control
 
@@ -183,7 +186,7 @@ written by the operator, so `group:analysts#member` works once the user is
 in that group:
 
 ```bash
-STORE=$(kubectl get dataplatform <name> -o jsonpath='{.status.rowFilterStoreID}')
+STORE=$(kubectl get datalake <name> -o jsonpath='{.status.rowFilterStoreID}')
 curl -sS "$OPENFGA/stores/$STORE/write" \
   -H "Authorization: Bearer $OPENFGA_API_KEY" -H 'Content-Type: application/json' \
   -d '{"writes":{"tuple_keys":[
@@ -220,8 +223,10 @@ Then re-run `make manifests generate`.
 
 ```bash
 make kind-up
-make run
+make run-data-lake
+make run-data-analytics
 kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
+kubectl --context kind-data-platform-dev apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml
 ```
 
 That brings up Keycloak, LakeKeeper, Trino, and Superset behind mkcert TLS on
@@ -230,10 +235,10 @@ with Keycloak (`admin` / password from `keycloak/keycloak-admin`). To query Trin
 from DBeaver-CE, see [docs/dbeaver.md](docs/dbeaver.md).
 
 Superset uses `data-platform-superset:5.0.0`, built from
-[`images/superset/Dockerfile`](images/superset/Dockerfile) (stock Apache Superset
-plus `authlib` and the Trino dialect). `make kind-up` builds and loads it; for
-other clusters run `make docker-build-superset SUPERSET_IMG=...` and push/set
-`spec.superset.image`.
+[`data-analytics-operator/images/superset/Dockerfile`](data-analytics-operator/images/superset/Dockerfile)
+(stock Apache Superset plus `authlib` and the Trino dialect). `make kind-up` builds
+and loads it; for other clusters run `make docker-build-superset SUPERSET_IMG=...`
+and set `spec.image` on the Analytics resource.
 
 ## Notes
 

@@ -61,9 +61,9 @@ func defaultAccessGroups() []accessGroup {
 	}
 }
 
-func (r *DataPlatformReconciler) reconcileAccessGroups(
+func (r *DataLakeReconciler) reconcileAccessGroups(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	oidc oidcConfig,
 	fga openfgaConfig,
 ) error {
@@ -118,9 +118,9 @@ func (r *DataPlatformReconciler) reconcileAccessGroups(
 	return nil
 }
 
-func (r *DataPlatformReconciler) accessGroupMembers(
+func (r *DataLakeReconciler) accessGroupMembers(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 ) (map[string][]CatalogPrincipal, error) {
 	if r.Catalog == nil {
 		return nil, fmt.Errorf("catalog client is not configured")
@@ -187,7 +187,7 @@ func (r *DataPlatformReconciler) accessGroupMembers(
 	return out, nil
 }
 
-func (r *DataPlatformReconciler) keycloakGroupMembers(
+func (r *DataLakeReconciler) keycloakGroupMembers(
 	ctx context.Context,
 	ns, realm, token, groupID string,
 ) ([]CatalogPrincipal, error) {
