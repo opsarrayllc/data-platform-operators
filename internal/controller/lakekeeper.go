@@ -32,9 +32,9 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileLakekeeper(
+func (r *DataLakeReconciler) reconcileLakekeeper(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	conn postgresConn,
 	oidc oidcConfig,
 	fga openfgaConfig,
@@ -68,9 +68,9 @@ func (r *DataPlatformReconciler) reconcileLakekeeper(
 	return nil
 }
 
-func (r *DataPlatformReconciler) ensureEncryptionSecret(
+func (r *DataLakeReconciler) ensureEncryptionSecret(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	secret := &corev1.Secret{}
@@ -87,9 +87,9 @@ func (r *DataPlatformReconciler) ensureEncryptionSecret(
 	})
 }
 
-func (r *DataPlatformReconciler) applyLakekeeperService(
+func (r *DataLakeReconciler) applyLakekeeperService(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameLakekeeper, Namespace: ns}}
@@ -106,9 +106,9 @@ func (r *DataPlatformReconciler) applyLakekeeperService(
 	})
 }
 
-func (r *DataPlatformReconciler) applyLakekeeperDeployment(
+func (r *DataLakeReconciler) applyLakekeeperDeployment(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	conn postgresConn,
 	oidc oidcConfig,
@@ -167,7 +167,7 @@ func (r *DataPlatformReconciler) applyLakekeeperDeployment(
 	})
 }
 
-func lakekeeperEnv(dp *dataplatformv1alpha1.DataPlatform, conn postgresConn, oidc oidcConfig, fga openfgaConfig) []corev1.EnvVar {
+func lakekeeperEnv(dp *dataplatformv1alpha1.DataLake, conn postgresConn, oidc oidcConfig, fga openfgaConfig) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{
 			Name: keyEncryption,
@@ -246,7 +246,7 @@ func lakekeeperEnv(dp *dataplatformv1alpha1.DataPlatform, conn postgresConn, oid
 	)
 }
 
-func (r *DataPlatformReconciler) deploymentReady(ctx context.Context, ns, name string) (bool, error) {
+func (r *DataLakeReconciler) deploymentReady(ctx context.Context, ns, name string) (bool, error) {
 	deploy := &appsv1.Deployment{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, deploy); err != nil {
 		return false, err

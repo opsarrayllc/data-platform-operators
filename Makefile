@@ -39,17 +39,18 @@ all: build
 
 .PHONY: help
 help: ## Display this help.
-	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-24s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
 ##@ Development
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./..." output:crd:artifacts:config=config/crd/bases
+	# Stay inside this module. data-analytics-operator has its own module and CRDs.
+	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/..." paths="./internal/..." paths="./cmd/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
-	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./..."
+	"$(CONTROLLER_GEN)" object:headerFile="hack/boilerplate.go.txt",year=$(YEAR) paths="./api/..." paths="./internal/..." paths="./cmd/..."
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -62,6 +63,7 @@ vet: ## Run go vet against code.
 .PHONY: test
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+	$(MAKE) -C data-analytics-operator test
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -119,11 +121,19 @@ lint-config: golangci-lint ## Verify golangci-lint linter configuration
 
 .PHONY: build
 build: manifests generate fmt vet ## Build manager binary.
-	go build -o bin/manager cmd/main.go
+	go build -o bin/manager ./cmd
 
+.PHONY: run-data-lake
+run-data-lake: manifests generate fmt vet ## Run the data lake operator from your host.
+	go run ./cmd
+
+.PHONY: run-data-analytics
+run-data-analytics: ## Run the data analytics operator from your host.
+	$(MAKE) -C data-analytics-operator run
+
+# Same as run-data-lake. Kept so the kubebuilder scaffold name still starts the lake.
 .PHONY: run
-run: manifests generate fmt vet ## Run a controller from your host.
-	go run ./cmd/main.go
+run: run-data-lake
 
 # If you wish to build the manager image targeting other platforms you can use the --platform flag.
 # (i.e. docker build --platform linux/arm64). However, you must enable docker buildKit for it.
@@ -133,11 +143,10 @@ docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
 SUPERSET_IMG ?= data-platform-superset:5.0.0
-SUPERSET_DOCKERFILE ?= images/superset/Dockerfile
 
 .PHONY: docker-build-superset
 docker-build-superset: ## Build the Superset image with OAuth/Trino extras baked in.
-	$(CONTAINER_TOOL) build -t ${SUPERSET_IMG} -f ${SUPERSET_DOCKERFILE} images/superset
+	$(MAKE) -C data-analytics-operator docker-build-superset SUPERSET_IMG=$(SUPERSET_IMG) CONTAINER_TOOL=$(CONTAINER_TOOL)
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
@@ -166,7 +175,7 @@ build-installer: manifests generate kustomize ## Generate a consolidated YAML wi
 ##@ Helm
 
 HELM ?= helm
-HELM_CHART_DIR ?= deploy/data-platform-operator
+HELM_CHART_DIR ?= deploy/data-lake-operator
 
 .PHONY: helm-sync
 helm-sync: manifests ## Sync generated CRDs and RBAC rules into the Helm chart.

@@ -1,4 +1,4 @@
-# DataPlatform with row- and column-level access control in Trino.
+# DataLake with row- and column-level access control in Trino.
 #
 # LakeKeeper decides who may read a table. Row filters then narrow a readable
 # table down to the rows a user is entitled to, and column access hides the
@@ -7,7 +7,7 @@
 # The operator provisions one OpenFGA store for both. Write the tuples yourself
 # against the store id in status.rowFilterStoreID:
 #
-#   kubectl get dataplatform rowfilters -o jsonpath='{.status.rowFilterStoreID}'
+#   kubectl get datalake rowfilters -o jsonpath='{.status.rowFilterStoreID}'
 #
 #   # alice sees EMEA rows and the ssn column; analysts see US rows
 #   curl -sS "$OPENFGA/stores/$STORE/write" \
@@ -27,7 +27,7 @@
 # sees NULL (or the configured mask) in that column. Both fail closed if
 # OpenFGA becomes unreachable.
 apiVersion: dataplatform.opsarray.io/v1alpha1
-kind: DataPlatform
+kind: DataLake
 metadata:
   name: rowfilters
 spec:

@@ -1,19 +1,20 @@
-# Local DataPlatform for kind (embedded MinIO + Postgres + Keycloak, coordinator-only Trino).
+# Local DataLake for kind (embedded MinIO + Postgres + Keycloak, coordinator-only Trino).
 #
 #   make kind-up      # recreate cluster, ingress, mkcert TLS, CRDs
-#   make run          # or: make deploy IMG=...
+#   make run-data-lake          # or: make deploy IMG=...
 #   kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
 #
 # Hosts (also printed by kind-up): 127.0.0.1 keycloak.data-platform.local lakekeeper.data-platform.local trino.data-platform.local superset.data-platform.local
 # Login user admin (group platform-admins); password is in secret keycloak/keycloak-admin.
 # Create more users in Keycloak and add them to platform-admins, data-engineers, or analysts.
 # DBeaver against Trino: docs/dbeaver.md (OAuth2 + mkcert trust; not username/password).
-# Superset: https://superset.data-platform.local (Keycloak login). First Trino query may
-# prompt a one-time OAuth consent; catalog/row/column access follows the same groups and authz policies.
+# Superset is a separate Analytics resource. Apply
+# data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml after this
+# DataLake is up, then run the analytics operator with make run-data-analytics.
 # Sample data (default on): lakekeeper.sales.orders and lakekeeper.sales.invoices are seeded
 # automatically once Trino and the warehouse are ready.
 apiVersion: dataplatform.opsarray.io/v1alpha1
-kind: DataPlatform
+kind: DataLake
 metadata:
   name: local
 spec:
@@ -50,13 +51,5 @@ spec:
     namespace: trino
     publicURL: https://trino.data-platform.local
     workers: 0
-    service:
-      type: ClusterIP
-  superset:
-    enabled: true
-    namespace: superset
-    publicURL: https://superset.data-platform.local
-    postgres:
-      storageSize: 1Gi
     service:
       type: ClusterIP

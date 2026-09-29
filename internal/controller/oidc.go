@@ -39,8 +39,6 @@ type oidcConfig struct {
 	trinoSecret      string
 	opaClientID      string
 	opaSecret        string
-	supersetClientID string
-	supersetSecret   string
 	operatorClientID string
 	operatorSecret   string
 	// adminSubject is the OIDC subject of the human admin the operator manages,
@@ -62,7 +60,7 @@ type oidcConfig struct {
 	proxyTokenPath string
 }
 
-func (r *DataPlatformReconciler) reconcileAuth(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) (oidcConfig, bool, error) {
+func (r *DataLakeReconciler) reconcileAuth(ctx context.Context, dp *dataplatformv1alpha1.DataLake) (oidcConfig, bool, error) {
 	if !dp.Spec.Auth.IsEnabled() {
 		setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionTrue, reasonDisabled, "Authentication is disabled")
 		return oidcConfig{}, true, nil
@@ -78,7 +76,7 @@ func (r *DataPlatformReconciler) reconcileAuth(ctx context.Context, dp *dataplat
 	return cfg, true, nil
 }
 
-func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform) (oidcConfig, error) {
+func (r *DataLakeReconciler) externalOIDC(ctx context.Context, dp *dataplatformv1alpha1.DataLake) (oidcConfig, error) {
 	spec := dp.Spec.Auth.OIDC
 	if spec == nil || spec.Issuer == "" {
 		err := fmt.Errorf("spec.auth.oidc.issuer is required when auth.embedded is false")
@@ -124,23 +122,6 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		}
 	}
 
-	supersetID := trinoID
-	supersetSecret := trinoSecret
-	if ref.SupersetClientIDKey != "" {
-		supersetID, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.SupersetClientIDKey)
-		if err != nil {
-			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
-			return oidcConfig{}, err
-		}
-	}
-	if ref.SupersetClientSecretKey != "" {
-		supersetSecret, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.SupersetClientSecretKey)
-		if err != nil {
-			setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionFalse, reasonError, err.Error())
-			return oidcConfig{}, err
-		}
-	}
-
 	issuer := strings.TrimRight(spec.Issuer, "/")
 	return oidcConfig{
 		enabled:          true,
@@ -152,15 +133,13 @@ func (r *DataPlatformReconciler) externalOIDC(ctx context.Context, dp *dataplatf
 		trinoSecret:      trinoSecret,
 		opaClientID:      trinoID,
 		opaSecret:        trinoSecret,
-		supersetClientID: supersetID,
-		supersetSecret:   supersetSecret,
 		operatorClientID: clientID,
 		operatorSecret:   clientSecret,
 		tokenURL:         spec.TokenEndpointOrDefault(),
 	}, nil
 }
 
-func (r *DataPlatformReconciler) oidcAccessToken(ctx context.Context, cfg oidcConfig) (string, error) {
+func (r *DataLakeReconciler) oidcAccessToken(ctx context.Context, cfg oidcConfig) (string, error) {
 	if !cfg.enabled {
 		return "", nil
 	}

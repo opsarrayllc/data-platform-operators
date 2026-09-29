@@ -1,0 +1,838 @@
+/*
+Copyright 2026.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+)
+
+const (
+	// ConditionReady is True when every enabled component is ready.
+	ConditionReady = "Ready"
+	// ConditionPostgresReady is True when LakeKeeper's Postgres is usable.
+	ConditionPostgresReady = "PostgresReady"
+	// ConditionLakekeeperReady is True when the LakeKeeper Deployment is ready.
+	ConditionLakekeeperReady = "LakekeeperReady"
+	// ConditionWarehouseReady is True when the Iceberg warehouse exists.
+	ConditionWarehouseReady = "WarehouseReady"
+	// ConditionTrinoReady is True when the Trino coordinator is ready.
+	ConditionTrinoReady = "TrinoReady"
+	// ConditionMinioReady is True when in-cluster MinIO is usable, or when using an external store.
+	ConditionMinioReady = "MinioReady"
+	// ConditionAuthReady is True when the identity provider is usable, or when auth is disabled.
+	ConditionAuthReady = "AuthReady"
+	// ConditionOpenFGAReady is True when OpenFGA is usable, or when authorization is disabled.
+	ConditionOpenFGAReady = "OpenFGAReady"
+	// ConditionSampleDataReady is True when demo Iceberg tables are seeded, or sample data is disabled.
+	ConditionSampleDataReady = "SampleDataReady"
+
+	DefaultLakekeeperNamespace = "lakekeeper"
+	DefaultTrinoNamespace      = "trino"
+	DefaultMinioNamespace      = "minio"
+	DefaultKeycloakNamespace   = "keycloak"
+	DefaultOpenFGANamespace    = "openfga"
+	DefaultLakekeeperImage     = "quay.io/lakekeeper/catalog:v0.13.3"
+	DefaultTrinoImage          = "trinodb/trino:476"
+	DefaultPostgresImage       = "postgres:17"
+	// Upstream minio/minio and minio/mc images are no longer anonymously
+	// pullable (Docker Hub deleted the repos; quay.io returns 401). These are
+	// the pgsty community forks, which keep the same server and mc entrypoints.
+	DefaultMinioImage    = "docker.io/pgsty/minio:RELEASE.2026-08-04T00-00-00Z"
+	DefaultMcImage       = "docker.io/pgsty/mc:RELEASE.2026-09-16T00-00-00Z"
+	DefaultKeycloakImage = "quay.io/keycloak/keycloak:26.3.3"
+	DefaultOpenFGAImage  = "openfga/openfga:v1.8.12"
+	DefaultOPAImage      = "openpolicyagent/opa:1.10.1"
+	DefaultOpenFGAStore  = "lakekeeper"
+	// DefaultSampleDataImage runs the one-shot Trino SQL seed Job.
+	DefaultSampleDataImage = "python:3.12-alpine"
+	// DefaultSampleDataSchema is the Iceberg namespace / Trino schema used for demo tables.
+	DefaultSampleDataSchema = "sales"
+	// DefaultTrinoCatalog is the Trino catalog the operator points at the
+	// managed LakeKeeper warehouse.
+	DefaultTrinoCatalog = "lakekeeper"
+	// DefaultRowFilterStore is a second OpenFGA store, separate from the one
+	// LakeKeeper owns. LakeKeeper migrates its own authorization model, so the
+	// row-filter and column-access types cannot live alongside it.
+	DefaultRowFilterStore = "rowfilters"
+	// DefaultRowFilterRelation is the OpenFGA relation a user must hold on a
+	// value object for that value to pass a row filter, or on a column object
+	// to see that column unmasked.
+	DefaultRowFilterRelation = "viewer"
+	// DefaultColumnMask is the SQL expression Trino applies to a restricted
+	// column when the user has no grant. NULL is valid for every Trino type.
+	DefaultColumnMask           = "NULL"
+	DefaultWarehouseName        = "default"
+	DefaultPostgresStorage      = "10Gi"
+	DefaultMinioStorage         = "20Gi"
+	DefaultMinioBucket          = "warehouse"
+	DefaultS3Flavor             = "aws"
+	DefaultS3CompatFlavor       = "s3-compat"
+	DefaultS3CompatRegion       = "us-east-1"
+	DefaultOIDCRealm            = "dataplatform"
+	DefaultOIDCAudience         = "lakekeeper"
+	DefaultOIDCClientID         = "lakekeeper"
+	DefaultOIDCTrinoClientID    = "trino"
+	DefaultOIDCOpaClientID      = "opa"
+	DefaultOIDCSupersetClientID = "superset"
+	DefaultOIDCOperatorClient   = "operator"
+	DefaultOIDCScope            = "lakekeeper"
+	DefaultOIDCAdminUser        = "admin"
+	// DefaultOIDCAdminUserID is imported as the Keycloak user id for the local
+	// admin, which makes the OIDC subject predictable. The operator needs to know
+	// it up front to grant that user LakeKeeper's admin role after bootstrap.
+	DefaultOIDCAdminUserID = "00000000-0000-4000-8000-000000000001"
+
+	// DefaultGroupPlatformAdmins is the Keycloak group (and matching LakeKeeper
+	// role) for catalog administrators.
+	DefaultGroupPlatformAdmins = "platform-admins"
+	// DefaultGroupDataEngineers is the Keycloak group for users who create and
+	// modify tables in the default warehouse.
+	DefaultGroupDataEngineers = "data-engineers"
+	// DefaultGroupAnalysts is the Keycloak group for users who read the default
+	// warehouse.
+	DefaultGroupAnalysts = "analysts"
+)
+
+// DataLakeSpec defines the desired state of DataLake.
+type DataLakeSpec struct {
+	// storage configures the object store used by the Iceberg warehouse.
+	// Required when LakeKeeper is enabled.
+	// +optional
+	Storage StorageSpec `json:"storage"`
+
+	// auth configures OIDC. By default the operator deploys Keycloak for local
+	// use. Set embedded to false and fill oidc to use Okta, JumpCloud, or another IdP.
+	// +optional
+	Auth AuthSpec `json:"auth"`
+
+	// authz configures fine-grained authorization. By default the operator deploys
+	// OpenFGA and an OPA bridge so Trino enforces LakeKeeper permissions.
+	// +optional
+	Authz AuthzSpec `json:"authz"`
+
+	// lakekeeper configures the Iceberg REST catalog.
+	// +optional
+	Lakekeeper LakekeeperSpec `json:"lakekeeper"`
+
+	// trino configures the query engine.
+	// +optional
+	Trino TrinoSpec `json:"trino"`
+
+	// sampleData seeds a demo Iceberg schema with a few tables and rows once
+	// Trino and the warehouse are ready, so you can try queries immediately.
+	// +optional
+	SampleData SampleDataSpec `json:"sampleData"`
+}
+
+// AuthSpec configures identity for LakeKeeper and Trino.
+// By default the operator deploys Keycloak. Set embedded to false and fill oidc
+// to use an existing provider such as Okta or JumpCloud.
+type AuthSpec struct {
+	// enabled turns on OIDC for LakeKeeper, OpenFGA clients, the Trino Iceberg
+	// catalog, and the Trino coordinator. The Web UI uses OAuth only when
+	// spec.trino.publicURL is set. Defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// embedded deploys Keycloak in its own namespace. Defaults to true when auth is enabled.
+	// +optional
+	Embedded *bool `json:"embedded,omitempty"`
+
+	// keycloak configures the operator-managed Keycloak instance.
+	// The imported realm includes groups platform-admins, data-engineers, and
+	// analysts. Add a user to a group to grant the matching LakeKeeper role on
+	// the default warehouse.
+	// +optional
+	Keycloak KeycloakSpec `json:"keycloak"`
+
+	// oidc is required when embedded is false.
+	// +optional
+	OIDC *OIDCSpec `json:"oidc,omitempty"`
+}
+
+// KeycloakSpec configures operator-managed Keycloak.
+// The imported realm includes groups platform-admins, data-engineers, and
+// analysts. Add a user to a group to grant the matching LakeKeeper role on
+// the default warehouse (full admin, create/modify, or read). Group membership
+// is synced on reconcile.
+type KeycloakSpec struct {
+	// namespace defaults to "keycloak". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the Keycloak container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// realm is imported on first start. Defaults to "dataplatform".
+	// +optional
+	Realm string `json:"realm,omitempty"`
+
+	// publicURL is the Keycloak URL browsers use (for example https://keycloak.example.com).
+	// When set, Keycloak advertises this hostname (and trusts X-Forwarded-* from an ingress).
+	// LakeKeeper's UI redirect uses this issuer; in-cluster services still use cluster DNS.
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// resources are compute resource requirements for the Keycloak container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// OIDCSpec points at an existing OpenID Connect provider (Okta, JumpCloud, Keycloak, ...).
+type OIDCSpec struct {
+	// issuer is the OIDC issuer URL (no trailing slash).
+	// Example (Okta): https://example.okta.com/oauth2/default
+	// Example (JumpCloud / Keycloak): https://idp.example.com/realms/company
+	// +kubebuilder:validation:MinLength=1
+	Issuer string `json:"issuer"`
+
+	// audience is the expected JWT aud claim. Defaults to "lakekeeper".
+	// +optional
+	Audience string `json:"audience,omitempty"`
+
+	// clientID is the OIDC client used by the LakeKeeper UI and, unless overridden
+	// in the credentials Secret, by Trino and the operator.
+	// +optional
+	ClientID string `json:"clientID,omitempty"`
+
+	// tokenEndpoint is the OAuth2 token URL. Defaults to issuer + "/protocol/openid-connect/token"
+	// (Keycloak / JumpCloud). Okta typically needs "/v1/token" on the authorization server.
+	// +optional
+	TokenEndpoint string `json:"tokenEndpoint,omitempty"`
+
+	// scope is requested during the client-credentials grant. Defaults to "lakekeeper".
+	// +optional
+	Scope string `json:"scope,omitempty"`
+
+	// credentialsSecretRef locates the client secret (and optional per-component client IDs).
+	// Namespace is required because DataLake is cluster-scoped.
+	// +optional
+	CredentialsSecretRef *OIDCCredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+}
+
+// OIDCCredentialsSecretRef locates a Secret with OIDC client credentials.
+type OIDCCredentialsSecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret.
+	Namespace string `json:"namespace"`
+
+	// clientSecretKey is the Secret key for the client secret.
+	// +optional
+	// +kubebuilder:default=clientSecret
+	ClientSecretKey string `json:"clientSecretKey,omitempty"`
+
+	// clientIDKey, if set, overrides spec.auth.oidc.clientID from the Secret.
+	// +optional
+	ClientIDKey string `json:"clientIDKey,omitempty"`
+
+	// trinoClientIDKey, if set, uses a separate confidential client for Trino.
+	// +optional
+	TrinoClientIDKey string `json:"trinoClientIDKey,omitempty"`
+
+	// trinoClientSecretKey, if set, uses a separate secret for the Trino client.
+	// +optional
+	TrinoClientSecretKey string `json:"trinoClientSecretKey,omitempty"`
+
+	// supersetClientIDKey, if set, reads the analytics operator's Superset client id
+	// from this Secret. The embedded realm always provisions that client.
+	// +optional
+	SupersetClientIDKey string `json:"supersetClientIDKey,omitempty"`
+
+	// supersetClientSecretKey, if set, reads the Superset client secret from this Secret.
+	// +optional
+	SupersetClientSecretKey string `json:"supersetClientSecretKey,omitempty"`
+}
+
+// AuthzSpec configures LakeKeeper authorization and the Trino OPA bridge.
+// By default the operator deploys OpenFGA. Set enabled to false to use
+// LakeKeeper's allowall authorizer (authenticated users can do anything).
+type AuthzSpec struct {
+	// enabled deploys OpenFGA and uses it as LakeKeeper's authorizer.
+	// Defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// embedded deploys OpenFGA in its own namespace. Defaults to true when authz is enabled.
+	// +optional
+	Embedded *bool `json:"embedded,omitempty"`
+
+	// openfga configures the operator-managed OpenFGA instance and the OPA bridge.
+	// +optional
+	OpenFGA OpenFGASpec `json:"openfga"`
+
+	// rowFilters restrict which rows each user sees in Trino. LakeKeeper grants
+	// access to whole tables; these entries narrow a granted table down to the
+	// rows whose key column holds a value the user may see.
+	//
+	// Each entry pins one table to one column, and names the OpenFGA object type
+	// whose members are that column's permitted values. The operator provisions
+	// the types in a dedicated OpenFGA store; write the user-to-value tuples
+	// yourself, for example "user:alice viewer region:emea".
+	//
+	// Requires Trino and authz to be enabled. A table with no reachable
+	// permitted values returns no rows.
+	// +optional
+	// +listType=atomic
+	RowFilters []RowFilterSpec `json:"rowFilters,omitempty"`
+
+	// columnAccess restricts which columns each user sees in Trino. LakeKeeper
+	// grants access to whole tables; these entries hide a column's values
+	// unless the user holds the named relation on the column's OpenFGA object.
+	//
+	// The default object id is "{catalog}.{schema}.{table}.{column}", so
+	// "user:alice viewer column:lakekeeper.sales.orders.ssn" reveals ssn.
+	// Set openfga.object to share one grant across tables, for example "ssn".
+	//
+	// Users without a grant see the mask expression (NULL by default). The
+	// column still appears in the schema; its values do not. Fails closed:
+	// an unreachable OpenFGA masks every restricted column.
+	// +optional
+	// +listType=atomic
+	ColumnAccess []ColumnAccessSpec `json:"columnAccess,omitempty"`
+}
+
+// ColumnAccessSpec hides one Trino column from users who lack an OpenFGA grant.
+type ColumnAccessSpec struct {
+	// catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
+	// the catalog the operator creates for the managed warehouse.
+	// +optional
+	Catalog string `json:"catalog,omitempty"`
+
+	// schema is the Trino schema, which is a LakeKeeper namespace.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Schema string `json:"schema"`
+
+	// table is the table holding the column.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Table string `json:"table"`
+
+	// column is the column to hide. It must match the column's case as stored
+	// in the table, which Iceberg normally lowercases.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^[A-Za-z_][A-Za-z0-9_]*$"
+	Column string `json:"column"`
+
+	// mask is the SQL expression Trino substitutes for the column when the
+	// user has no grant. Defaults to NULL. This value is taken from the CR,
+	// not from OpenFGA, and is applied as a view expression.
+	// +optional
+	// +kubebuilder:validation:MaxLength=256
+	Mask string `json:"mask,omitempty"`
+
+	// openfga names the object type and relation that grant an unmasked view
+	// of this column.
+	// +kubebuilder:validation:Required
+	OpenFGA ColumnAccessSubjectSpec `json:"openfga"`
+}
+
+// ColumnAccessSubjectSpec points at the OpenFGA object that represents one
+// restricted column.
+type ColumnAccessSubjectSpec struct {
+	// type is the OpenFGA object type. Combined with object, this is the
+	// tuple target, for example "column:lakekeeper.sales.orders.ssn".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9_][a-zA-Z0-9_-]*$"
+	Type string `json:"type"`
+
+	// relation is the relation a user must hold to see the column unmasked.
+	// Defaults to "viewer". Assignable to users and to group members.
+	// +optional
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9_][a-zA-Z0-9_-]*$"
+	Relation string `json:"relation,omitempty"`
+
+	// object is the OpenFGA object id. Defaults to
+	// "{catalog}.{schema}.{table}.{column}". Set this to a short name such as
+	// "ssn" to grant that column on every table that uses the same type.
+	// +optional
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9._|-]+$"
+	Object string `json:"object,omitempty"`
+}
+
+// RowFilterSpec restricts one Trino table to the rows a user is allowed to see.
+type RowFilterSpec struct {
+	// catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
+	// the catalog the operator creates for the managed warehouse.
+	// +optional
+	Catalog string `json:"catalog,omitempty"`
+
+	// schema is the Trino schema, which is a LakeKeeper namespace.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Schema string `json:"schema"`
+
+	// table is the table to filter.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Table string `json:"table"`
+
+	// column is the column whose value decides whether a row is visible. It is
+	// emitted as a quoted identifier, so it must match the column's case as
+	// stored in the table, which Iceberg normally lowercases.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^[A-Za-z_][A-Za-z0-9_]*$"
+	Column string `json:"column"`
+
+	// openfga names the object type and relation that hold the permitted values.
+	// +kubebuilder:validation:Required
+	OpenFGA RowFilterSubjectSpec `json:"openfga"`
+
+	// numeric compares the column against unquoted SQL literals, for integer
+	// and decimal columns. Defaults to false, which emits quoted strings.
+	// Non-numeric values are dropped from a numeric filter.
+	// +optional
+	Numeric *bool `json:"numeric,omitempty"`
+}
+
+// RowFilterSubjectSpec points at the OpenFGA type whose objects are the values
+// a user may see in the filtered column.
+type RowFilterSubjectSpec struct {
+	// type is the OpenFGA object type. Object ids under this type are matched
+	// against the column, so "region:emea" permits the value "emea".
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9_][a-zA-Z0-9_-]*$"
+	Type string `json:"type"`
+
+	// relation is the relation a user must hold on a value object. Defaults to
+	// "viewer". The operator defines it as assignable to users and to group
+	// members, so tuples may target "user:alice" or "group:analysts#member".
+	// +optional
+	// +kubebuilder:validation:Pattern="^[a-zA-Z0-9_][a-zA-Z0-9_-]*$"
+	Relation string `json:"relation,omitempty"`
+}
+
+// OpenFGASpec configures operator-managed OpenFGA (and the OPA sidecar used by Trino).
+type OpenFGASpec struct {
+	// namespace defaults to "openfga". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the OpenFGA container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// opaImage is the Open Policy Agent image that translates Trino checks to LakeKeeper.
+	// +optional
+	OPAImage string `json:"opaImage,omitempty"`
+
+	// store is the OpenFGA store name LakeKeeper uses. Defaults to "lakekeeper".
+	// +optional
+	Store string `json:"store,omitempty"`
+
+	// rowFilterStore is the OpenFGA store holding row-filter and column-access
+	// tuples. Defaults to "rowfilters". It is deliberately separate from store,
+	// because LakeKeeper migrates the authorization model in its own store.
+	// +optional
+	RowFilterStore string `json:"rowFilterStore,omitempty"`
+
+	// postgres is OpenFGA's metadata database.
+	// +optional
+	Postgres PostgresSpec `json:"postgres"`
+
+	// resources are compute resource requirements for the OpenFGA container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// StorageSpec configures table data storage.
+// By default the operator deploys MinIO. Set embedded to false and fill s3
+// to use AWS S3 or another existing S3-compatible store.
+type StorageSpec struct {
+	// embedded deploys MinIO in its own namespace. Defaults to true.
+	// +optional
+	Embedded *bool `json:"embedded,omitempty"`
+
+	// minio configures the operator-managed MinIO instance.
+	// +optional
+	Minio MinioSpec `json:"minio"`
+
+	// s3 is required when embedded is false.
+	// +optional
+	S3 *S3Spec `json:"s3,omitempty"`
+}
+
+// MinioSpec configures operator-managed MinIO.
+type MinioSpec struct {
+	// namespace defaults to "minio". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the MinIO server image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// mcImage is the MinIO client image used to create the bucket.
+	// +optional
+	McImage string `json:"mcImage,omitempty"`
+
+	// storageSize is the PVC size.
+	// +optional
+	StorageSize string `json:"storageSize,omitempty"`
+
+	// bucket is created in MinIO if it does not exist.
+	// +optional
+	Bucket string `json:"bucket,omitempty"`
+
+	// resources are compute resource requirements for the MinIO container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// S3Spec is the warehouse object-store profile.
+type S3Spec struct {
+	// bucket is the S3 bucket name.
+	// +kubebuilder:validation:MinLength=1
+	Bucket string `json:"bucket"`
+
+	// region is the AWS region, or a placeholder such as "local" for S3-compatible stores.
+	// +kubebuilder:validation:MinLength=1
+	Region string `json:"region"`
+
+	// endpoint is an optional custom S3 API URL (MinIO, SeaweedFS, etc.).
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// pathStyleAccess uses path-style URLs. Required for many S3-compatible stores.
+	// +optional
+	PathStyleAccess bool `json:"pathStyleAccess,omitempty"`
+
+	// flavor selects the LakeKeeper storage profile.
+	// +optional
+	// +kubebuilder:validation:Enum=aws;s3-compat
+	// +kubebuilder:default=aws
+	Flavor string `json:"flavor,omitempty"`
+
+	// stsEnabled asks LakeKeeper to vend temporary credentials to engines.
+	// +optional
+	STSEnabled bool `json:"stsEnabled,omitempty"`
+
+	// stsRoleARN is the IAM role LakeKeeper assumes when STS is enabled.
+	// +optional
+	STSRoleARN string `json:"stsRoleARN,omitempty"`
+
+	// credentialsSecretRef points at a Secret with static S3 keys.
+	// Namespace is required because DataLake is cluster-scoped.
+	// Required when using an external store (storage.embedded=false).
+	// +optional
+	CredentialsSecretRef *S3CredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+}
+
+// S3CredentialsSecretRef locates a Secret that holds AWS-style access keys.
+type S3CredentialsSecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret.
+	Namespace string `json:"namespace"`
+
+	// accessKeyIDKey is the Secret key for the access key ID.
+	// +optional
+	// +kubebuilder:default=AWS_ACCESS_KEY_ID
+	AccessKeyIDKey string `json:"accessKeyIDKey,omitempty"`
+
+	// secretAccessKeyKey is the Secret key for the secret access key.
+	// +optional
+	// +kubebuilder:default=AWS_SECRET_ACCESS_KEY
+	SecretAccessKeyKey string `json:"secretAccessKeyKey,omitempty"`
+}
+
+// LakekeeperSpec configures the Iceberg REST catalog.
+type LakekeeperSpec struct {
+	// enabled deploys LakeKeeper. Defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// namespace is the Kubernetes namespace for LakeKeeper (and embedded Postgres).
+	// Defaults to "lakekeeper". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the LakeKeeper container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// replicas is the number of LakeKeeper pods.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	Replicas *int32 `json:"replicas,omitempty"`
+
+	// resources are compute resource requirements for the catalog container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// extraEnv is appended to the LakeKeeper container (LAKEKEEPER__* and others).
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+
+	// publicURL is the LakeKeeper URL browsers use (for example https://lakekeeper.example.com).
+	// When set, the UI advertises this origin. In-cluster clients still use cluster DNS.
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// postgres is the catalog metadata database.
+	// +optional
+	Postgres PostgresSpec `json:"postgres"`
+
+	// warehouse is created via the LakeKeeper management API after bootstrap.
+	// +optional
+	Warehouse WarehouseSpec `json:"warehouse"`
+}
+
+// PostgresSpec is either an operator-managed instance or a pointer at an existing database.
+type PostgresSpec struct {
+	// embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+	// Defaults to true. Set false and fill host/credentials for an external database.
+	// +optional
+	Embedded *bool `json:"embedded,omitempty"`
+
+	// image is used when embedded is true.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// storageSize is the PVC size for embedded Postgres.
+	// +optional
+	StorageSize string `json:"storageSize,omitempty"`
+
+	// host is required when embedded is false.
+	// +optional
+	Host string `json:"host,omitempty"`
+
+	// port of the external database.
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// database name.
+	// +optional
+	Database string `json:"database,omitempty"`
+
+	// sslMode is passed to the Postgres driver (disable, prefer, require, ...).
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+
+	// credentialsSecretRef locates username/password for an external database.
+	// +optional
+	CredentialsSecretRef *PostgresCredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+}
+
+// PostgresCredentialsSecretRef locates a Secret with username and password.
+type PostgresCredentialsSecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret. Defaults to the LakeKeeper namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// usernameKey is the Secret key for the database user.
+	// +optional
+	// +kubebuilder:default=username
+	UsernameKey string `json:"usernameKey,omitempty"`
+
+	// passwordKey is the Secret key for the database password.
+	// +optional
+	// +kubebuilder:default=password
+	PasswordKey string `json:"passwordKey,omitempty"`
+}
+
+// WarehouseSpec is the LakeKeeper warehouse created for Iceberg tables.
+type WarehouseSpec struct {
+	// name is the warehouse identifier engines use in iceberg.rest-catalog.warehouse.
+	// +optional
+	Name string `json:"name,omitempty"`
+
+	// keyPrefix is an optional path inside the bucket.
+	// +optional
+	KeyPrefix string `json:"keyPrefix,omitempty"`
+}
+
+// TrinoSpec configures the query engine.
+type TrinoSpec struct {
+	// enabled deploys Trino. Defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// namespace is the Kubernetes namespace for Trino.
+	// Defaults to "trino". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the Trino container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// workers is the number of Trino worker pods. Zero runs a coordinator-only cluster.
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	Workers *int32 `json:"workers,omitempty"`
+
+	// coordinator configures the Trino coordinator.
+	// +optional
+	Coordinator TrinoCoordinatorSpec `json:"coordinator"`
+
+	// extraConfig is merged into config.properties (key=value).
+	// +optional
+	ExtraConfig map[string]string `json:"extraConfig,omitempty"`
+
+	// extraCatalogs adds extra files under etc/catalog. The "lakekeeper" catalog is reserved.
+	// +optional
+	ExtraCatalogs map[string]string `json:"extraCatalogs,omitempty"`
+
+	// extraEnv is appended to Trino containers.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+
+	// publicURL is the Trino URL browsers use (for example https://trino.example.com).
+	// When set and auth is enabled, the coordinator Web UI uses OIDC (OAuth2).
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// resources are compute resource requirements for worker pods.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// service exposes the coordinator.
+	// +optional
+	Service ServiceSpec `json:"service"`
+}
+
+// TrinoCoordinatorSpec configures the coordinator pod.
+type TrinoCoordinatorSpec struct {
+	// resources are compute resource requirements for the coordinator container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
+// ServiceSpec configures a Kubernetes Service.
+type ServiceSpec struct {
+	// type is the Service type.
+	// +optional
+	// +kubebuilder:default=ClusterIP
+	Type corev1.ServiceType `json:"type,omitempty"`
+}
+
+// SampleDataSpec seeds demo Iceberg tables through Trino for local testing.
+type SampleDataSpec struct {
+	// enabled creates schema sales with sample orders/invoices tables once Trino
+	// and the warehouse are ready. Defaults to true when Trino is enabled.
+	// Requires embedded Keycloak (or auth disabled) so the seed Job can authenticate.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// schema is the Trino/Iceberg schema (namespace) name. Defaults to "sales".
+	// +optional
+	Schema string `json:"schema,omitempty"`
+
+	// image is the container image used by the one-shot seed Job.
+	// Defaults to python:3.12-alpine.
+	// +optional
+	Image string `json:"image,omitempty"`
+}
+
+// DataLakeStatus defines the observed state of DataLake.
+type DataLakeStatus struct {
+	// conditions represent the current state of the DataLake resource.
+	//
+	// Standard condition types include:
+	// - "Ready": every enabled component is fully functional
+	// - "MinioReady": in-cluster MinIO is ready, or an external object store is configured
+	// - "AuthReady": Keycloak is ready, an external OIDC issuer is configured, or auth is disabled
+	// - "OpenFGAReady": OpenFGA is ready, or authorization is disabled
+	// - "PostgresReady": the catalog database is usable
+	// - "LakekeeperReady": the catalog Deployment is ready
+	// - "WarehouseReady": the Iceberg warehouse has been created
+	// - "TrinoReady": the Trino coordinator is ready
+	// - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
+	//
+	// The status of each condition is one of True, False, or Unknown.
+	// +listType=map
+	// +listMapKey=type
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// minioEndpoint is the in-cluster S3 API URL when MinIO is embedded.
+	// +optional
+	MinioEndpoint string `json:"minioEndpoint,omitempty"`
+
+	// lakekeeperEndpoint is the in-cluster HTTP URL of the catalog.
+	// +optional
+	LakekeeperEndpoint string `json:"lakekeeperEndpoint,omitempty"`
+
+	// trinoEndpoint is the in-cluster HTTP URL of the Trino coordinator.
+	// +optional
+	TrinoEndpoint string `json:"trinoEndpoint,omitempty"`
+
+	// keycloakEndpoint is the in-cluster HTTP URL of Keycloak when it is embedded.
+	// +optional
+	KeycloakEndpoint string `json:"keycloakEndpoint,omitempty"`
+
+	// openfgaEndpoint is the in-cluster gRPC URL of OpenFGA when it is embedded.
+	// +optional
+	OpenFGAEndpoint string `json:"openfgaEndpoint,omitempty"`
+
+	// rowFilterStoreID is the OpenFGA store id the operator provisioned for row
+	// filters and column access. Use it when writing tuples against the OpenFGA
+	// API.
+	// +optional
+	RowFilterStoreID string `json:"rowFilterStoreID,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
+// +kubebuilder:printcolumn:name="Lakekeeper",type=string,JSONPath=".status.lakekeeperEndpoint"
+// +kubebuilder:printcolumn:name="Trino",type=string,JSONPath=".status.trinoEndpoint"
+// +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
+
+// DataLake is the Schema for the datalakes API.
+type DataLake struct {
+	metav1.TypeMeta `json:",inline"`
+
+	// metadata is a standard object metadata
+	// +optional
+	metav1.ObjectMeta `json:"metadata,omitzero"`
+
+	// spec defines the desired state of DataLake
+	// +required
+	Spec DataLakeSpec `json:"spec"`
+
+	// status defines the observed state of DataLake
+	// +optional
+	Status DataLakeStatus `json:"status,omitzero"`
+}
+
+// +kubebuilder:object:root=true
+
+// DataLakeList contains a list of DataLake
+type DataLakeList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitzero"`
+	Items           []DataLake `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(func(s *runtime.Scheme) error {
+		s.AddKnownTypes(SchemeGroupVersion, &DataLake{}, &DataLakeList{})
+		return nil
+	})
+}

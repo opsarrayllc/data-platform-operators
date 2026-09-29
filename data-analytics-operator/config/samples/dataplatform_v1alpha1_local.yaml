@@ -1,0 +1,28 @@
+# Local Analytics for kind. Apply after the local DataLake so Keycloak has
+# created the oidc Secret this resource reads.
+#
+#   make run-data-analytics
+#   kubectl --context kind-data-platform-dev apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml
+#
+# Superset: https://superset.data-platform.local (Keycloak login). The first
+# Trino query may prompt a one-time OAuth consent.
+apiVersion: dataplatform.opsarray.io/v1alpha1
+kind: Analytics
+metadata:
+  name: local
+spec:
+  namespace: superset
+  publicURL: https://superset.data-platform.local
+  postgres:
+    storageSize: 1Gi
+  trino:
+    host: trino.trino.svc
+    catalog: lakekeeper
+  auth:
+    enabled: true
+    oidc:
+      issuer: http://keycloak.keycloak.svc:8080/realms/dataplatform
+      publicIssuer: https://keycloak.data-platform.local/realms/dataplatform
+      credentialsSecretRef:
+        name: oidc
+        namespace: keycloak

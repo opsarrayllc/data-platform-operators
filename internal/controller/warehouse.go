@@ -26,7 +26,7 @@ import (
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
 
-func (r *DataPlatformReconciler) reconcileWarehouse(ctx context.Context, dp *dataplatformv1alpha1.DataPlatform, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
+func (r *DataLakeReconciler) reconcileWarehouse(ctx context.Context, dp *dataplatformv1alpha1.DataLake, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
 	log := logf.FromContext(ctx)
 	if r.Catalog == nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonMissing, "Catalog client is not configured")
@@ -85,7 +85,7 @@ func (r *DataPlatformReconciler) reconcileWarehouse(ctx context.Context, dp *dat
 // catalogPrincipals lists the identities that need grants once the catalog is
 // bootstrapped. Empty for external issuers, where the operator does not own the
 // user list and cannot predict subjects.
-func catalogPrincipals(dp *dataplatformv1alpha1.DataPlatform, oidc oidcConfig) []CatalogPrincipal {
+func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []CatalogPrincipal {
 	if oidc.adminSubject == "" {
 		return nil
 	}

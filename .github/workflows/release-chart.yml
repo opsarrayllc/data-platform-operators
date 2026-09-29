@@ -9,6 +9,8 @@ on:
       - 'deploy/**'
       - 'config/crd/**'
       - 'config/rbac/**'
+      - 'data-analytics-operator/config/crd/**'
+      - 'data-analytics-operator/config/rbac/**'
       - 'hack/sync-helm-manifests.sh'
       - '.github/workflows/release-chart.yml'
   workflow_dispatch:
@@ -24,7 +26,7 @@ env:
   # Charts are pushed under a charts/ prefix so they sit alongside, rather than
   # collide with, the operator image package of the same name.
   CHART_REPO: ghcr.io/${{ github.repository_owner }}/charts
-  CHART_DIR: deploy/data-platform-operator
+  CHART_DIR: deploy/data-lake-operator
 
 jobs:
   chart:
@@ -52,17 +54,27 @@ jobs:
         run: |
           # Compare content directly rather than via git, which reports no diff
           # for a file that is untracked.
-          cp -r "${CHART_DIR}" "${RUNNER_TEMP}/chart-expected"
-          ./hack/sync-helm-manifests.sh config/crd/bases config/rbac/role.yaml "${RUNNER_TEMP}/chart-expected"
-          for f in templates/crds.yaml templates/_manager-rules.tpl; do
-            if ! diff -u "${CHART_DIR}/${f}" "${RUNNER_TEMP}/chart-expected/${f}"; then
-              echo "::error::${f} is out of date. Run 'make helm-sync' and commit the result."
-              exit 1
-            fi
-          done
+          verify_chart() {
+            local chart="$1" crds="$2" role="$3"
+            local expected="${RUNNER_TEMP}/chart-$(basename "${chart}")"
+            cp -r "${chart}" "${expected}"
+            ./hack/sync-helm-manifests.sh "${crds}" "${role}" "${expected}"
+            for f in templates/crds.yaml templates/_manager-rules.tpl; do
+              if ! diff -u "${chart}/${f}" "${expected}/${f}"; then
+                echo "::error::${chart}/${f} is out of date. Run 'make helm-sync' and commit the result."
+                exit 1
+              fi
+            done
+          }
+          verify_chart deploy/data-lake-operator config/crd/bases config/rbac/role.yaml
+          verify_chart deploy/data-analytics-operator \
+            data-analytics-operator/config/crd/bases \
+            data-analytics-operator/config/rbac/role.yaml
 
       - name: Lint chart
-        run: helm lint "${CHART_DIR}"
+        run: |
+          helm lint deploy/data-lake-operator
+          helm lint deploy/data-analytics-operator
 
       - name: Render chart
         run: helm template data-platform-operator "${CHART_DIR}" > /dev/null

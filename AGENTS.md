@@ -145,7 +145,8 @@ kubebuilder create webhook \
 
 ```bash
 make test              # Run unit tests (uses envtest: real K8s API + etcd)
-make run               # Run locally (uses current kubeconfig context)
+make run-data-lake        # Run the data lake operator (current kubeconfig context)
+make run-data-analytics   # Run the data analytics operator (current kubeconfig context)
 ```
 
 Tests use **Ginkgo + Gomega** (BDD style). Check `suite_test.go` for setup.

@@ -46,9 +46,9 @@ type objectStore struct {
 	SecretAccessKey string
 }
 
-func (r *DataPlatformReconciler) reconcileObjectStore(
+func (r *DataLakeReconciler) reconcileObjectStore(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 ) (objectStore, bool, error) {
 	if !dp.Spec.Storage.IsEmbedded() {
 		store, err := r.externalObjectStore(ctx, dp)
@@ -66,9 +66,9 @@ func (r *DataPlatformReconciler) reconcileObjectStore(
 	return store, ready, nil
 }
 
-func (r *DataPlatformReconciler) externalObjectStore(
+func (r *DataLakeReconciler) externalObjectStore(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 ) (objectStore, error) {
 	s3 := dp.Spec.Storage.S3
 	if s3 == nil {
@@ -105,9 +105,9 @@ func (r *DataPlatformReconciler) externalObjectStore(
 	}, nil
 }
 
-func (r *DataPlatformReconciler) reconcileMinio(
+func (r *DataLakeReconciler) reconcileMinio(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 ) (objectStore, bool, error) {
 	spec := dp.Spec.Storage.Minio
 	ns := spec.NamespaceOrDefault()
@@ -175,9 +175,9 @@ func (r *DataPlatformReconciler) reconcileMinio(
 	return store, true, nil
 }
 
-func (r *DataPlatformReconciler) ensureMinioSecret(
+func (r *DataLakeReconciler) ensureMinioSecret(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	secret := &corev1.Secret{}
@@ -199,9 +199,9 @@ func (r *DataPlatformReconciler) ensureMinioSecret(
 	})
 }
 
-func (r *DataPlatformReconciler) applyMinioService(
+func (r *DataLakeReconciler) applyMinioService(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameMinio, Namespace: ns}}
@@ -217,9 +217,9 @@ func (r *DataPlatformReconciler) applyMinioService(
 	})
 }
 
-func (r *DataPlatformReconciler) applyMinioStatefulSet(
+func (r *DataLakeReconciler) applyMinioStatefulSet(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.MinioSpec,
 ) error {
@@ -292,9 +292,9 @@ func (r *DataPlatformReconciler) applyMinioStatefulSet(
 	})
 }
 
-func (r *DataPlatformReconciler) ensureMinioBucket(
+func (r *DataLakeReconciler) ensureMinioBucket(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.MinioSpec,
 	accessKey, secretKey string,

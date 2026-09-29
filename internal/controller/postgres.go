@@ -40,9 +40,9 @@ type postgresConn struct {
 	SSLMode  string
 }
 
-func (r *DataPlatformReconciler) reconcilePostgres(
+func (r *DataLakeReconciler) reconcilePostgres(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 ) (postgresConn, error) {
 	ns := dp.Spec.Lakekeeper.NamespaceOrDefault()
 	spec := dp.Spec.Lakekeeper.Postgres
@@ -86,9 +86,9 @@ func (r *DataPlatformReconciler) reconcilePostgres(
 	return conn, nil
 }
 
-func (r *DataPlatformReconciler) externalPostgres(
+func (r *DataLakeReconciler) externalPostgres(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	spec dataplatformv1alpha1.PostgresSpec,
 ) (postgresConn, error) {
 	if spec.Host == "" {
@@ -127,9 +127,9 @@ func (r *DataPlatformReconciler) externalPostgres(
 	}, nil
 }
 
-func (r *DataPlatformReconciler) ensurePostgresSecret(
+func (r *DataLakeReconciler) ensurePostgresSecret(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	secret := &corev1.Secret{}
@@ -149,9 +149,9 @@ func (r *DataPlatformReconciler) ensurePostgresSecret(
 	})
 }
 
-func (r *DataPlatformReconciler) applyPostgresService(
+func (r *DataLakeReconciler) applyPostgresService(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: ns}}
@@ -168,9 +168,9 @@ func (r *DataPlatformReconciler) applyPostgresService(
 	})
 }
 
-func (r *DataPlatformReconciler) applyPostgresStatefulSet(
+func (r *DataLakeReconciler) applyPostgresStatefulSet(
 	ctx context.Context,
-	dp *dataplatformv1alpha1.DataPlatform,
+	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.PostgresSpec,
 ) error {
@@ -229,7 +229,7 @@ func (r *DataPlatformReconciler) applyPostgresStatefulSet(
 	})
 }
 
-func (r *DataPlatformReconciler) statefulSetReady(ctx context.Context, ns, name string) (bool, error) {
+func (r *DataLakeReconciler) statefulSetReady(ctx context.Context, ns, name string) (bool, error) {
 	sts := &appsv1.StatefulSet{}
 	if err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, sts); err != nil {
 		return false, err
