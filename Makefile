@@ -45,7 +45,7 @@ help: ## Display this help.
 
 .PHONY: manifests
 manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and CustomResourceDefinition objects.
-	# Stay inside this module. data-analytics-operator has its own module and CRDs.
+	# Stay inside this module. data-analytics-operator and data-orchestration-operator have their own modules and CRDs.
 	"$(CONTROLLER_GEN)" rbac:roleName=manager-role crd webhook paths="./api/..." paths="./internal/..." paths="./cmd/..." output:crd:artifacts:config=config/crd/bases
 
 .PHONY: generate
@@ -64,6 +64,7 @@ vet: ## Run go vet against code.
 test: manifests generate fmt vet setup-envtest ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell "$(ENVTEST)" use $(ENVTEST_K8S_VERSION) --bin-dir "$(LOCALBIN)" -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 	$(MAKE) -C data-analytics-operator test
+	$(MAKE) -C data-orchestration-operator test
 
 # TODO(user): To use a different vendor for e2e tests, modify the setup under 'tests/e2e'.
 # The default setup assumes Kind is pre-installed and builds/loads the Manager Docker image locally.
@@ -130,6 +131,10 @@ run-data-lake: manifests generate fmt vet ## Run the data lake operator from you
 .PHONY: run-data-analytics
 run-data-analytics: ## Run the data analytics operator from your host.
 	$(MAKE) -C data-analytics-operator run
+
+.PHONY: run-data-orchestration
+run-data-orchestration: ## Run the data orchestration operator from your host.
+	$(MAKE) -C data-orchestration-operator run
 
 # Same as run-data-lake. Kept so the kubebuilder scaffold name still starts the lake.
 .PHONY: run
@@ -225,7 +230,7 @@ KIND_DEV_CLUSTER ?= data-platform-dev
 KIND_DEV_CONFIG ?= config/kind/kind-data-platform-dev.yaml
 
 .PHONY: platform-up
-platform-up: ## Recreate the kind cluster, apply local samples, and run both operators in the foreground.
+platform-up: ## Recreate the kind cluster, apply local samples, and run the operators in the foreground.
 	KIND_DEV_CLUSTER="$(KIND_DEV_CLUSTER)" KIND_DEV_CONFIG="$(KIND_DEV_CONFIG)" \
 		KIND="$(KIND)" KUBECTL="$(KUBECTL)" ./hack/platform-up.sh
 

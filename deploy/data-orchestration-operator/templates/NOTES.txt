@@ -1,0 +1,39 @@
+{{ .Chart.Name }} {{ .Chart.Version }} installed as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Manager image: {{ include "data-orchestration-operator.image" . }}
+
+Watch the controller come up:
+
+  kubectl rollout status deployment/{{ include "data-orchestration-operator.fullname" . }} -n {{ .Release.Namespace }}
+
+Follow its logs:
+
+  kubectl logs -n {{ .Release.Namespace }} deployment/{{ include "data-orchestration-operator.fullname" . }} -c manager -f
+
+{{ if .Values.crds.enabled -}}
+Create an Orchestration resource to see it reconcile:
+
+  kubectl apply -f - <<'EOF'
+  apiVersion: dataplatform.opsarray.io/v1alpha1
+  kind: Orchestration
+  metadata:
+    name: example
+  spec: {}
+  EOF
+
+  kubectl get orchestrations
+{{- else }}
+CRD installation is disabled (crds.enabled=false). Install the Orchestration CRD
+separately before creating any Orchestration resources.
+{{- end }}
+
+{{ if and .Values.metrics.enabled .Values.metrics.secure -}}
+Metrics are served over HTTPS on port {{ .Values.metrics.port }} and require a
+token authorized by the "{{ include "data-orchestration-operator.fullname" . }}-metrics-reader"
+ClusterRole. Bind that role to your Prometheus service account to scrape them.
+{{- end }}
+{{- if .Values.metrics.serviceMonitor.enabled }}
+
+A ServiceMonitor was created. It requires the Prometheus Operator CRDs to be
+installed, otherwise this release will fail to render.
+{{- end }}

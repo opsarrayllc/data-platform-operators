@@ -107,6 +107,8 @@ const (
 	keyOIDCOpaClientSecret       = "opaClientSecret"
 	keyOIDCSupersetClientID      = "supersetClientID"
 	keyOIDCSupersetClientSecret  = "supersetClientSecret"
+	keyOIDCArgoClientID          = "argoClientID"
+	keyOIDCArgoClientSecret      = "argoClientSecret"
 	keyKeycloakAdminUser         = "username"
 	keyKeycloakAdminPassword     = "password"
 	keyTrinoSharedSecret         = "sharedSecret"

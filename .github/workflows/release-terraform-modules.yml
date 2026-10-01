@@ -1,0 +1,177 @@
+name: Release Terraform modules
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'terraform/modules/**'
+      - 'hack/terraform-module-release.sh'
+      - '.github/workflows/release-terraform-modules.yml'
+  pull_request:
+    paths:
+      - 'terraform/modules/**'
+      - 'hack/terraform-module-release.sh'
+      - '.github/workflows/release-terraform-modules.yml'
+  workflow_dispatch:
+
+permissions: {}
+
+# A push to main publishes one release per changed module. Do not cancel that
+# run; a newer push re-plans from the tags the first run created.
+concurrency:
+  group: release-terraform-modules-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  plan:
+    name: Plan module releases
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      validate_modules: ${{ steps.plan.outputs.validate_modules }}
+      release_modules: ${{ steps.plan.outputs.release_modules }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select modules
+        id: plan
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          release_modules='[]'
+          if [ "${EVENT_NAME}" != "pull_request" ]; then
+            release_modules="$(bash hack/terraform-module-release.sh plan)"
+            validate_modules="${release_modules}"
+          else
+            mapfile -t all < <(find terraform/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)
+            changed="$(git diff --name-only "${BASE_SHA}" HEAD)"
+            selected=()
+            if printf '%s\n' "${changed}" | grep -Eq '^(hack/terraform-module-release\.sh|\.github/workflows/release-terraform-modules\.yml)$'; then
+              selected=("${all[@]}")
+            else
+              for name in "${all[@]}"; do
+                if printf '%s\n' "${changed}" | grep -q "^terraform/modules/${name}/"; then
+                  selected+=("${name}")
+                fi
+              done
+            fi
+            if [ "${#selected[@]}" -eq 0 ]; then
+              validate_modules='[]'
+            else
+              validate_modules="$(printf '%s\n' "${selected[@]}" | jq -R . | jq -sc .)"
+            fi
+          fi
+          echo "validate_modules=${validate_modules}" >> "${GITHUB_OUTPUT}"
+          echo "release_modules=${release_modules}" >> "${GITHUB_OUTPUT}"
+          echo "Validate: ${validate_modules}"
+          echo "Release: ${release_modules}"
+
+  validate:
+    name: Validate ${{ matrix.module }}
+    needs: plan
+    if: needs.plan.outputs.validate_modules != '[]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.plan.outputs.validate_modules) }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_wrapper: false
+
+      - name: Check formatting
+        run: terraform fmt -check -recursive "terraform/modules/${{ matrix.module }}"
+
+      - name: Validate module
+        env:
+          TF_IN_AUTOMATION: "1"
+        run: |
+          terraform -chdir="terraform/modules/${{ matrix.module }}" init -backend=false -input=false
+          terraform -chdir="terraform/modules/${{ matrix.module }}" validate
+
+      - name: Package module
+        id: package
+        run: |
+          version="0.0.0-${GITHUB_SHA::7}"
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            version="$(bash hack/terraform-module-release.sh version "${{ matrix.module }}")"
+          fi
+          if [ -z "${version}" ]; then
+            echo "::error::${{ matrix.module }} was selected for release but has no version"
+            exit 1
+          fi
+          bash hack/terraform-module-release.sh package "${{ matrix.module }}" "${version}" dist
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload package
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: terraform-data-lake-${{ matrix.module }}-v${{ steps.package.outputs.version }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Release ${{ matrix.module }}
+    needs:
+      - plan
+      - validate
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name != 'pull_request' &&
+      needs.plan.outputs.release_modules != '[]' &&
+      needs.validate.result == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        module: ${{ fromJson(needs.plan.outputs.release_modules) }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Package and publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          module="${{ matrix.module }}"
+          version="$(bash hack/terraform-module-release.sh version "${module}")"
+          if [ -z "${version}" ]; then
+            echo "${module} no longer needs a release"
+            exit 0
+          fi
+          tag="terraform-data-lake-${module}-v${version}"
+          if gh release view "${tag}" >/dev/null 2>&1; then
+            echo "Release ${tag} already exists"
+            exit 0
+          fi
+          bash hack/terraform-module-release.sh package "${module}" "${version}" dist
+          bash hack/terraform-module-release.sh notes "${module}" "${version}" > notes.md
+          gh release create "${tag}" \
+            --target "${GITHUB_SHA}" \
+            --title "terraform-data-lake-${module}-v${version}" \
+            --notes-file notes.md \
+            "dist/terraform-data-lake-${module}-v${version}.zip"

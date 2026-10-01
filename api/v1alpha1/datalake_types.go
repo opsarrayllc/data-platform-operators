@@ -90,6 +90,7 @@ const (
 	DefaultOIDCTrinoClientID    = "trino"
 	DefaultOIDCOpaClientID      = "opa"
 	DefaultOIDCSupersetClientID = "superset"
+	DefaultOIDCArgoClientID     = "argo"
 	DefaultOIDCOperatorClient   = "operator"
 	DefaultOIDCScope            = "lakekeeper"
 	DefaultOIDCAdminUser        = "admin"
@@ -260,6 +261,15 @@ type OIDCCredentialsSecretRef struct {
 	// supersetClientSecretKey, if set, reads the Superset client secret from this Secret.
 	// +optional
 	SupersetClientSecretKey string `json:"supersetClientSecretKey,omitempty"`
+
+	// argoClientIDKey, if set, reads the orchestration operator's Argo client id
+	// from this Secret. The embedded realm always provisions that client.
+	// +optional
+	ArgoClientIDKey string `json:"argoClientIDKey,omitempty"`
+
+	// argoClientSecretKey, if set, reads the Argo client secret from this Secret.
+	// +optional
+	ArgoClientSecretKey string `json:"argoClientSecretKey,omitempty"`
 }
 
 // AuthzSpec configures LakeKeeper authorization and the Trino OPA bridge.

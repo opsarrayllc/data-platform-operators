@@ -14,8 +14,8 @@ KUBECTL_BIN="${KUBECTL:-kubectl}"
 CERT_DIR="${KIND_CERT_DIR:-${ROOT}/bin/certs}"
 KUBECONFIG_FILE="${KIND_KUBECONFIG:-${ROOT}/bin/kubeconfig-${CLUSTER}}"
 TLS_SECRET="${KIND_TLS_SECRET:-data-platform-tls}"
-NAMESPACES=(keycloak lakekeeper trino openfga superset minio)
-HOSTS=(keycloak lakekeeper trino openfga opa superset minio)
+NAMESPACES=(keycloak lakekeeper trino openfga superset minio argo)
+HOSTS=(keycloak lakekeeper trino openfga opa superset minio argo)
 
 abs_from_root() {
 	case "$1" in
@@ -113,6 +113,9 @@ make -C "${ROOT}" install KUBECONFIG="${KUBECONFIG_FILE}"
 echo "==> Installing Analytics CRDs"
 make -C "${ROOT}/data-analytics-operator" install KUBECONFIG="${KUBECONFIG_FILE}"
 
+echo "==> Installing Orchestration CRDs"
+make -C "${ROOT}/data-orchestration-operator" install KUBECONFIG="${KUBECONFIG_FILE}"
+
 SUPERSET_IMG="${SUPERSET_IMG:-data-platform-superset:5.0.0}"
 echo "==> Building and loading Superset image ${SUPERSET_IMG}"
 make -C "${ROOT}" docker-build-superset SUPERSET_IMG="${SUPERSET_IMG}"
@@ -145,8 +148,10 @@ if [ "${PLATFORM_UP:-}" != "1" ]; then
 	echo "Next:"
 	echo "  make run-data-lake"
 	echo "  make run-data-analytics"
+	echo "  make run-data-orchestration"
 	echo "  kubectl --context ${CONTEXT} apply -f config/samples/dataplatform_v1alpha1_local.yaml"
 	echo "  kubectl --context ${CONTEXT} apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml"
+	echo "  kubectl --context ${CONTEXT} apply -f data-orchestration-operator/config/samples/dataplatform_v1alpha1_local.yaml"
 	echo "Or replace this whole sequence, including kind-up, with: make platform-up"
 fi
 echo "Open:"
@@ -156,5 +161,6 @@ echo "  https://trino.${DOMAIN}"
 echo "  https://openfga.${DOMAIN}"
 echo "  https://opa.${DOMAIN}"
 echo "  https://superset.${DOMAIN}"
+echo "  https://argo.${DOMAIN}"
 echo "Admin password (after Keycloak is Ready):"
 echo "  kubectl --context ${CONTEXT} get secret keycloak-admin -n keycloak -o jsonpath='{.data.password}' | base64 -d; echo"

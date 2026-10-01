@@ -247,6 +247,10 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 		if genErr != nil {
 			return genErr
 		}
+		argoSecret, genErr := randomHex(16)
+		if genErr != nil {
+			return genErr
+		}
 		return r.ensureGeneratedSecret(ctx, dp, secretOIDC, ns, componentKeycloak, map[string][]byte{
 			keyOIDCClientID:             []byte(dataplatformv1alpha1.DefaultOIDCClientID),
 			keyOIDCTrinoClientID:        []byte(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
@@ -257,6 +261,8 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 			keyOIDCOpaClientSecret:      []byte(opaSecret),
 			keyOIDCSupersetClientID:     []byte(dataplatformv1alpha1.DefaultOIDCSupersetClientID),
 			keyOIDCSupersetClientSecret: []byte(supersetSecret),
+			keyOIDCArgoClientID:         []byte(dataplatformv1alpha1.DefaultOIDCArgoClientID),
+			keyOIDCArgoClientSecret:     []byte(argoSecret),
 		})
 	}
 	if err != nil {
@@ -294,6 +300,18 @@ func (r *DataLakeReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc *cor
 		oidc.Data[keyOIDCSupersetClientSecret] = []byte(secret)
 		changed = true
 	}
+	if _, ok := oidc.Data[keyOIDCArgoClientID]; !ok {
+		oidc.Data[keyOIDCArgoClientID] = []byte(dataplatformv1alpha1.DefaultOIDCArgoClientID)
+		changed = true
+	}
+	if _, ok := oidc.Data[keyOIDCArgoClientSecret]; !ok {
+		secret, err := randomHex(16)
+		if err != nil {
+			return err
+		}
+		oidc.Data[keyOIDCArgoClientSecret] = []byte(secret)
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -326,6 +344,10 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 	if err != nil {
 		return "", err
 	}
+	argoSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCArgoClientSecret)
+	if err != nil {
+		return "", err
+	}
 	signingKey, err := r.getSecretData(ctx, secretKeycloakRealmKey, ns, keyRealmPrivateKey)
 	if err != nil {
 		return "", err
@@ -341,6 +363,7 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 		operatorSecret:      operatorSecret,
 		opaSecret:           opaSecret,
 		supersetSecret:      supersetSecret,
+		argoSecret:          argoSecret,
 		signingKey:          signingKey,
 		signingCertificate:  signingCert,
 		lakekeeperNamespace: dp.Spec.Lakekeeper.NamespaceOrDefault(),
@@ -487,6 +510,7 @@ type realmOptions struct {
 	operatorSecret      string
 	opaSecret           string
 	supersetSecret      string
+	argoSecret          string
 	signingKey          string
 	signingCertificate  string
 	lakekeeperNamespace string
@@ -501,6 +525,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	operatorSecret := opts.operatorSecret
 	opaSecret := opts.opaSecret
 	supersetSecret := opts.supersetSecret
+	argoSecret := opts.argoSecret
 	lakekeeperPublicURL := opts.lakekeeperPublicURL
 	trinoPublicURL := opts.trinoPublicURL
 	realm := spec.RealmOrDefault()
@@ -524,6 +549,8 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	trinoRedirects = append(trinoRedirects, "*")
 	// Superset's own login redirect is chosen by the analytics operator too.
 	supersetRedirects := []string{"*"}
+	// Argo's callback host is chosen by the orchestration operator.
+	argoRedirects := []string{"*"}
 
 	doc := map[string]any{
 		"realm":               realm,
@@ -563,6 +590,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCTrinoClientID, "Trino", trinoSecret, trinoRedirects),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOpaClientID, "OPA", opaSecret, nil),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCSupersetClientID, "Superset", supersetSecret, supersetRedirects),
+			confidentialClient(dataplatformv1alpha1.DefaultOIDCArgoClientID, "Argo", argoSecret, argoRedirects),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOperatorClient, "Data Platform Operator", operatorSecret, nil),
 		},
 		"users": []map[string]any{
@@ -584,6 +612,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOpaClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCSupersetClientID),
+			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCArgoClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOperatorClient),
 		},
 	}
