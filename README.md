@@ -20,10 +20,13 @@ Built with [Kubebuilder](https://book.kubebuilder.io) v4 / controller-runtime.
 | --- | --- | --- | --- |
 | `dataplatform.opsarray.io` | `v1alpha1` | `DataLake` | this module |
 | `dataplatform.opsarray.io` | `v1alpha1` | `Analytics` | [`data-analytics-operator`](data-analytics-operator) |
+| `dataplatform.opsarray.io` | `v1alpha1` | `Orchestration` | [`data-orchestration-operator`](data-orchestration-operator) |
 
 `DataLake` deploys the lake (object storage, catalog, Trino, and identity).
 `Analytics` deploys Superset against that Trino. Its type lives in
 `data-analytics-operator/api/v1alpha1/analytics_types.go`.
+`Orchestration` deploys Argo Workflows. Its type lives in
+`data-orchestration-operator/api/v1alpha1/orchestration_types.go`.
 
 ## Prerequisites
 
@@ -44,7 +47,8 @@ make lint                 # golangci-lint
 make build                # compile the data lake manager to bin/manager
 make run-data-lake        # run the data lake operator against your current kubecontext
 make run-data-analytics   # run the data analytics operator against your current kubecontext
-make platform-up          # recreate the kind cluster, apply local samples, run both operators
+make run-data-orchestration # run the data orchestration operator against your current kubecontext
+make platform-up          # recreate the kind cluster, apply local samples, run the operators
 ```
 
 Both run targets use your active kubeconfig context, so install the CRDs first:
@@ -146,6 +150,11 @@ with a per-user OAuth2 token, so catalog, row-filter, and column-mask policies
 still apply. The first Trino query after login may prompt a one-time Keycloak
 consent.
 
+The orchestration operator maps those groups onto Argo ServiceAccounts. A login
+whose token contains the group runs as that account: `platform-admins` can
+delete workflows, `data-engineers` can create and update them, and `analysts`
+can read them. A token with none of those groups cannot sign in.
+
 ## Row-level access control
 
 LakeKeeper and OpenFGA authorize whole objects: a warehouse, a namespace, a
@@ -226,7 +235,7 @@ Then re-run `make manifests generate`.
 make platform-up
 ```
 
-That recreates the kind cluster, applies the local DataLake and Analytics samples, and runs both operators in the foreground. Ctrl+C stops the operators and leaves the cluster running.
+That recreates the kind cluster, applies the local DataLake, Analytics, and Orchestration samples, and runs the operators in the foreground. Ctrl+C stops the operators and leaves the cluster running.
 
 The same steps one at a time:
 
@@ -234,12 +243,15 @@ The same steps one at a time:
 make kind-up
 make run-data-lake
 make run-data-analytics
+make run-data-orchestration
 kubectl --context kind-data-platform-dev apply -f config/samples/dataplatform_v1alpha1_local.yaml
 kubectl --context kind-data-platform-dev apply -f data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml
+kubectl --context kind-data-platform-dev apply -f data-orchestration-operator/config/samples/dataplatform_v1alpha1_local.yaml
 ```
 
-That brings up Keycloak, LakeKeeper, Trino, and Superset behind mkcert TLS on
-`*.data-platform.local`. Open `https://superset.data-platform.local` and sign in
+That brings up Keycloak, LakeKeeper, Trino, Superset, and Argo behind mkcert TLS on
+`*.data-platform.local`. Open `https://superset.data-platform.local` or
+`https://argo.data-platform.local` and sign in
 with Keycloak (`admin` / password from `keycloak/keycloak-admin`). To query Trino
 from DBeaver-CE, see [docs/dbeaver.md](docs/dbeaver.md).
 

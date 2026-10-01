@@ -160,6 +160,7 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"basic"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"opa"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"argo"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"platform-admins"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"data-engineers"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"analysts"`))
@@ -403,6 +404,7 @@ var _ = Describe("DataLake Controller", func() {
 		realmCM := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapKeycloakRealm, Namespace: nameKeycloak}, realmCM)).To(Succeed())
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"argo"`))
 
 		cfg := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())

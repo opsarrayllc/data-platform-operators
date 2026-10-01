@@ -1,0 +1,19 @@
+{{- if .Values.metrics.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "data-orchestration-operator.fullname" . }}-metrics
+  labels:
+    {{- include "data-orchestration-operator.labels" . | nindent 4 }}
+    control-plane: controller-manager
+spec:
+  type: {{ .Values.metrics.service.type }}
+  ports:
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+      protocol: TCP
+  selector:
+    {{- include "data-orchestration-operator.selectorLabels" . | nindent 4 }}
+    control-plane: controller-manager
+{{- end }}

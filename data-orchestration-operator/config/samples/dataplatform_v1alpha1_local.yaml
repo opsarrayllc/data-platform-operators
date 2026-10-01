@@ -1,0 +1,22 @@
+# Local Orchestration for kind. Apply after the local DataLake so Keycloak has
+# created the oidc Secret this resource reads.
+#
+#   make run-data-orchestration
+#   kubectl --context kind-data-platform-dev apply -f data-orchestration-operator/config/samples/dataplatform_v1alpha1_local.yaml
+#
+# Argo: https://argo.data-platform.local (Keycloak login).
+apiVersion: dataplatform.opsarray.io/v1alpha1
+kind: Orchestration
+metadata:
+  name: local
+spec:
+  namespace: argo
+  publicURL: https://argo.data-platform.local
+  auth:
+    enabled: true
+    oidc:
+      issuer: http://keycloak.keycloak.svc:8080/realms/dataplatform
+      publicIssuer: https://keycloak.data-platform.local/realms/dataplatform
+      credentialsSecretRef:
+        name: oidc
+        namespace: keycloak

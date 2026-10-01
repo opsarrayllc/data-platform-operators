@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Recreate the local kind cluster, apply the local samples, and run both operators in the foreground.
+# Recreate the local kind cluster, apply the local samples, and run the operators in the foreground.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,16 +11,18 @@ make -C "${ROOT}" kind-up
 
 export KUBECONFIG="${KUBECONFIG_FILE}"
 
-echo "==> Checking both operators"
+echo "==> Checking operators"
 make -C "${ROOT}" manifests generate fmt vet
 make -C "${ROOT}/data-analytics-operator" manifests generate fmt vet
+make -C "${ROOT}/data-orchestration-operator" manifests generate fmt vet
 
-echo "==> Applying local DataLake and Analytics samples"
+echo "==> Applying local DataLake, Analytics, and Orchestration samples"
 kubectl apply -f "${ROOT}/config/samples/dataplatform_v1alpha1_local.yaml"
 kubectl apply -f "${ROOT}/data-analytics-operator/config/samples/dataplatform_v1alpha1_local.yaml"
+kubectl apply -f "${ROOT}/data-orchestration-operator/config/samples/dataplatform_v1alpha1_local.yaml"
 
 echo "==> Starting operators (Ctrl+C stops them and leaves the cluster running)"
-exec python3 -u - "${ROOT}" "${ROOT}/data-analytics-operator" <<'PY'
+exec python3 -u - "${ROOT}" "${ROOT}/data-analytics-operator" "${ROOT}/data-orchestration-operator" <<'PY'
 import os
 import signal
 import subprocess
@@ -28,11 +30,11 @@ import sys
 import threading
 import time
 
-if len(sys.argv) != 3:
-    sys.stderr.write("usage: platform-up <lake-dir> <analytics-dir>\n")
+if len(sys.argv) != 4:
+    sys.stderr.write("usage: platform-up <lake-dir> <analytics-dir> <orchestration-dir>\n")
     sys.exit(2)
 
-operators = [("lake", sys.argv[1]), ("analytics", sys.argv[2])]
+operators = [("lake", sys.argv[1]), ("analytics", sys.argv[2]), ("orchestration", sys.argv[3])]
 procs = []
 threads = []
 lock = threading.Lock()

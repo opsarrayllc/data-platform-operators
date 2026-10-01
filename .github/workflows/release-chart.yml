@@ -11,6 +11,8 @@ on:
       - 'config/rbac/**'
       - 'data-analytics-operator/config/crd/**'
       - 'data-analytics-operator/config/rbac/**'
+      - 'data-orchestration-operator/config/crd/**'
+      - 'data-orchestration-operator/config/rbac/**'
       - 'hack/sync-helm-manifests.sh'
       - '.github/workflows/release-chart.yml'
   workflow_dispatch:
@@ -70,11 +72,15 @@ jobs:
           verify_chart deploy/data-analytics-operator \
             data-analytics-operator/config/crd/bases \
             data-analytics-operator/config/rbac/role.yaml
+          verify_chart deploy/data-orchestration-operator \
+            data-orchestration-operator/config/crd/bases \
+            data-orchestration-operator/config/rbac/role.yaml
 
       - name: Lint chart
         run: |
           helm lint deploy/data-lake-operator
           helm lint deploy/data-analytics-operator
+          helm lint deploy/data-orchestration-operator
 
       - name: Render chart
         run: helm template data-platform-operator "${CHART_DIR}" > /dev/null
