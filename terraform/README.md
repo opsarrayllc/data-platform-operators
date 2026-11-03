@@ -4,11 +4,11 @@ Modules that create the Iceberg warehouse and the identity LakeKeeper and Trino 
 
 Set `spec.storage.embedded` to false and point the `DataLake` at the module output. The operator reads `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the Secret in `spec.storage.s3.credentialsSecretRef`. On AWS, when `stsEnabled` and `stsRoleARN` are set, LakeKeeper assumes that role and vends temporary credentials to Trino.
 
-`kubernetes_service_accounts` defaults to the operator namespaces and the `default` service account those pods use. Override it when the existing cluster uses other names. Each module outputs `kubernetes_service_account_annotation` for those accounts.
+On GCP and Azure, `kubernetes_service_accounts` defaults to the operator namespaces and the `default` service account those pods use. Override it when the existing cluster uses other names. Those modules output `kubernetes_service_account_annotation` for those accounts. The AWS module does not set up IRSA: the operator authenticates to S3 with the IAM user's access key, and only that user can assume the warehouse role.
 
 | Module | Existing inputs | What this module adds |
 | --- | --- | --- |
-| `modules/aws` | `region`, `vpc_id`, `s3_vpc_endpoint_id`, `oidc_provider_arn`, optional `kms_key_arn` | Bucket limited to that S3 endpoint. IAM user access key for LakeKeeper, and a role the cluster service accounts can assume. |
+| `modules/aws` | `region`, `vpc_id`, `s3_vpc_endpoint_id`, optional `kms_key_arn` | Bucket limited to that S3 endpoint. IAM user access key for LakeKeeper, and a role LakeKeeper assumes to vend temporary credentials to Trino. |
 | `modules/gcp` | `project_id`, `network`, `subnetwork`, `gke_cluster_name`, `gke_cluster_location` | GCS bucket. Service account HMAC key for the operator, and Workload Identity bindings for the cluster service accounts. The subnet must already have Private Google Access, and the cluster must already have Workload Identity. |
 | `modules/azure` | `resource_group_name`, `location`, `subnet_id`, `private_dns_zone_id`, `aks_oidc_issuer_url` | ADLS Gen2 account, a private endpoint on that subnet, and an Entra app. The app has Storage Blob Data Contributor and Storage Blob Delegator, plus federated credentials for the cluster service accounts. The DNS zone must already be linked to the cluster virtual network. |
 
@@ -20,7 +20,6 @@ module "warehouse" {
   region             = module.network.region
   vpc_id             = module.network.vpc_id
   s3_vpc_endpoint_id = module.network.s3_vpc_endpoint_id
-  oidc_provider_arn  = module.eks.oidc_provider_arn
   kms_key_arn        = module.kms.key_arn
 }
 ```

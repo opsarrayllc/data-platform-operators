@@ -5,7 +5,6 @@ module "warehouse" {
   region             = var.region
   vpc_id             = var.vpc_id
   s3_vpc_endpoint_id = var.s3_vpc_endpoint_id
-  oidc_provider_arn  = var.oidc_provider_arn
 }
 
 output "datalake_storage" {

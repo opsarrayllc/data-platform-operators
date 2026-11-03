@@ -17,8 +17,3 @@ variable "s3_vpc_endpoint_id" {
   description = "Existing S3 VPC endpoint id in vpc_id."
   type        = string
 }
-
-variable "oidc_provider_arn" {
-  description = "Existing cluster IAM OIDC provider ARN."
-  type        = string
-}
