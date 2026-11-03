@@ -44,36 +44,6 @@ variable "s3_vpc_endpoint_id" {
   }
 }
 
-variable "oidc_provider_arn" {
-  description = "IAM OIDC provider ARN of the existing cluster, used so its service accounts can assume the warehouse role."
-  type        = string
-
-  validation {
-    condition     = can(regex("^arn:aws:iam::[0-9]{12}:oidc-provider/.+", var.oidc_provider_arn))
-    error_message = "oidc_provider_arn must be the existing cluster's IAM OIDC provider ARN."
-  }
-}
-
-variable "kubernetes_service_accounts" {
-  description = "Service accounts on the existing cluster that may assume the warehouse role. Defaults are the operator namespaces and the default service account those pods use."
-  type = list(object({
-    namespace = string
-    name      = string
-  }))
-  default = [
-    { namespace = "lakekeeper", name = "default" },
-    { namespace = "trino", name = "default" },
-  ]
-
-  validation {
-    condition = length(var.kubernetes_service_accounts) > 0 && alltrue([
-      for sa in var.kubernetes_service_accounts :
-      can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", sa.namespace)) && can(regex("^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", sa.name))
-    ])
-    error_message = "kubernetes_service_accounts must contain at least one namespace and name, each a Kubernetes DNS label."
-  }
-}
-
 variable "vpc_endpoint_bypass_principal_arns" {
   description = "Existing IAM principals that may use the bucket from outside the VPC endpoint, such as the role that runs Terraform. Cluster workloads are not in this list; they go through s3_vpc_endpoint_id."
   type        = list(string)

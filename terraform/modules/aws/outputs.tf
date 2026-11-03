@@ -14,20 +14,13 @@ output "sts_enabled" {
 }
 
 output "sts_role_arn" {
-  description = "Role LakeKeeper assumes for vended credentials, and that the cluster service accounts can assume. DataLake field storage.s3.stsRoleARN. Null when sts_enabled is false."
+  description = "Role LakeKeeper assumes for vended credentials. DataLake field storage.s3.stsRoleARN. Null when sts_enabled is false."
   value       = var.sts_enabled ? aws_iam_role.warehouse.arn : null
 }
 
 output "warehouse_role_arn" {
-  description = "Warehouse role ARN. Annotate each kubernetes_service_accounts entry with kubernetes_service_account_annotation."
+  description = "Warehouse role ARN. Only the LakeKeeper IAM user can assume it."
   value       = aws_iam_role.warehouse.arn
-}
-
-output "kubernetes_service_account_annotation" {
-  description = "Annotation for the existing service accounts listed in kubernetes_service_accounts."
-  value = {
-    "eks.amazonaws.com/role-arn" = aws_iam_role.warehouse.arn
-  }
 }
 
 output "iam_user_arn" {

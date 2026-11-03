@@ -1,18 +1,9 @@
-data "aws_iam_openid_connect_provider" "cluster" {
-  arn = var.oidc_provider_arn
-}
-
-locals {
-  oidc_host = replace(data.aws_iam_openid_connect_provider.cluster.url, "https://", "")
-  service_account_subjects = [
-    for sa in var.kubernetes_service_accounts : "system:serviceaccount:${sa.namespace}/${sa.name}"
-  ]
-}
-
 # LakeKeeper stores this user's access key as the warehouse storage credential
 # and uses it for its own object IO and for remote signing. When STS is enabled,
 # LakeKeeper calls sts:AssumeRole on the warehouse role and returns the temporary
 # credentials to Trino (storage.s3.stsRoleARN, vended-credentials-enabled).
+# Only that user can assume the role. The operator does not use IRSA, so no
+# cluster service account is trusted.
 
 data "aws_iam_policy_document" "warehouse" {
   statement {
@@ -80,28 +71,6 @@ data "aws_iam_policy_document" "warehouse_trust" {
     principals {
       type        = "AWS"
       identifiers = [aws_iam_user.lakekeeper.arn]
-    }
-  }
-
-  statement {
-    sid     = "TrustClusterServiceAccounts"
-    actions = ["sts:AssumeRoleWithWebIdentity"]
-
-    principals {
-      type        = "Federated"
-      identifiers = [data.aws_iam_openid_connect_provider.cluster.arn]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${local.oidc_host}:aud"
-      values   = ["sts.amazonaws.com"]
-    }
-
-    condition {
-      test     = "StringEquals"
-      variable = "${local.oidc_host}:sub"
-      values   = local.service_account_subjects
     }
   }
 }
