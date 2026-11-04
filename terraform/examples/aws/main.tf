@@ -3,7 +3,7 @@
 # outputs.tf, and drop the provider blocks in versions.tf.
 
 module "warehouse" {
-  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.0.2"
+  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.0.1"
 
   bucket_name                        = var.bucket_name
   region                             = var.region
