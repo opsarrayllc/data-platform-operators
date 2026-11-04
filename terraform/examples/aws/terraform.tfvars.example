@@ -1,0 +1,5 @@
+region             = "us-east-1"
+bucket_name        = "my-org-warehouse"
+vpc_id             = "vpc-0123456789abcdef0"
+s3_vpc_endpoint_id = "vpce-0123456789abcdef0"
+eks_cluster_name   = "my-cluster"

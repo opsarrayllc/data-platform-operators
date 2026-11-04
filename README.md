@@ -128,6 +128,15 @@ To produce a single self-contained manifest for distribution:
 make build-installer IMG=$IMG   # writes dist/install.yaml
 ```
 
+## Cloud object storage
+
+By default a `DataLake` runs MinIO in the cluster. To keep the warehouse in S3 or GCS instead, use the Terraform modules under [`terraform/`](terraform). Each cloud has a copy-and-paste example that creates the following:
+- the bucket
+- the access identity
+- the credentials Secret
+
+The example then prints the `spec.storage` block to use. Start with [`terraform/README.md`](terraform/README.md).
+
 ## Users and groups
 
 Embedded Keycloak ships three groups. Create a user in the `dataplatform` realm
