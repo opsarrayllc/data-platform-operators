@@ -1,0 +1,7 @@
+project_id           = "my-project"
+bucket_name          = "my-org-warehouse"
+location             = "US"
+network              = "my-vpc"
+subnetwork           = "projects/my-project/regions/us-central1/subnetworks/my-subnet"
+gke_cluster_name     = "my-cluster"
+gke_cluster_location = "us-central1"
