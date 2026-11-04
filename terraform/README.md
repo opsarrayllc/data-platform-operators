@@ -153,7 +153,7 @@ Each release also attaches a zip of the module directory. The examples pin a tag
 
 ```hcl
 module "warehouse" {
-  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.0.2"
+  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.0.1"
 
   # ...
 }
