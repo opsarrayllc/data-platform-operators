@@ -14,7 +14,7 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 
 ### What you need already
 
-- An EKS cluster in a VPC, which the operator runs on.
+- An EKS cluster in a VPC, running the data lake operator 0.2.0 or later. Earlier operators don't support `spec.storage.s3.systemIdentity`, which module version 2.0.0 and later outputs. Pin module version 1.0.2 for an operator that still authenticates with an access key.
 - An S3 **gateway** endpoint in that VPC, attached to the route tables of the node subnets. The bucket rejects object access from anywhere else. If you don't have one, the example can create it (see step 2). An interface endpoint won't work, because the operator doesn't point LakeKeeper or Trino at the endpoint's DNS name.
 - Outbound access from the nodes to AWS STS, through a NAT gateway or an STS interface endpoint. LakeKeeper calls `sts:AssumeRole` to vend temporary credentials to Trino.
 - The `eks-pod-identity-agent` add-on on the cluster. LakeKeeper gets its AWS identity from an EKS Pod Identity association, not an access key. Set `create_pod_identity_agent = true` to have the example install the add-on.
@@ -131,7 +131,7 @@ What else to know:
 - **Databases are created in the cluster.** Terraform doesn't need a network path to RDS. Each component's pod runs an `ensure-database` init container that creates its database on first start.
 - **Credentials.** Terraform generates the master password and writes it to the `platform-postgres` Secret in the `lakekeeper` namespace. All three components use that one login. The operators copy it into each component's namespace and pass it to pods through Secret references, never as plain values. The password is in Terraform state too, so keep the state encrypted.
 - **New installs only.** Switching an existing platform from embedded to RDS doesn't move any data. The old in-cluster Postgres is left in place.
-- **Operator version.** OpenFGA and Superset need operator images that support an external database. That's the first operator release after this module version.
+- **Operator version.** OpenFGA and Superset on an external database need operator 0.2.0 or later.
 - **Destroying.** Deletion protection is on. Set `postgres_deletion_protection = false` on the module and apply before you run `terraform destroy`. Destroy takes a final snapshot named `<name>-postgres-final`. Delete that snapshot before you create the instance again with the same `name`.
 
 With `create_postgres = true`, `datalake_spec_yaml` also includes `lakekeeper.postgres` and `authz.openfga.postgres`. Print the Analytics fields too:
