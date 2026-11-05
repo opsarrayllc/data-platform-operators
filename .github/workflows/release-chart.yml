@@ -133,11 +133,21 @@ jobs:
           path: dist/*.tgz
           if-no-files-found: error
 
-      - name: Log in to GHCR
+      - name: Log in to GHCR (Helm)
         if: github.ref_type == 'tag'
         run: |
           echo "${{ secrets.GITHUB_TOKEN }}" \
             | helm registry login "${REGISTRY}" --username "${{ github.actor }}" --password-stdin
+
+      # helm registry login writes Helm's own credential store, but the
+      # attestation step reads ~/.docker/config.json, so log in there too.
+      - name: Log in to GHCR (Docker)
+        if: github.ref_type == 'tag'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push chart
         if: github.ref_type == 'tag'
