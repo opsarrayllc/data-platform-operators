@@ -89,7 +89,7 @@ Each operator has a chart, published to GitHub Packages as an OCI artifact under
 ```bash
 for chart in data-lake-operator data-analytics-operator data-orchestration-operator; do
   helm install "${chart}" "oci://ghcr.io/opsarrayllc/charts/${chart}" \
-    --version 0.1.0 \
+    --version 0.2.0 \
     --namespace data-platform-system --create-namespace
 done
 ```
