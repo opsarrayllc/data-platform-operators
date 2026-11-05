@@ -15,7 +15,7 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 ### What you need already
 
 - An EKS cluster in a VPC, which the operator runs on.
-- An S3 **gateway** endpoint in that VPC, attached to the route tables of the node subnets. The bucket rejects object access from anywhere else. An interface endpoint won't work, because the operator doesn't point LakeKeeper or Trino at the endpoint's DNS name.
+- An S3 **gateway** endpoint in that VPC, attached to the route tables of the node subnets. The bucket rejects object access from anywhere else. If you don't have one, the example can create it (see step 2). An interface endpoint won't work, because the operator doesn't point LakeKeeper or Trino at the endpoint's DNS name.
 - Outbound access from the nodes to AWS STS, through a NAT gateway or an STS interface endpoint. LakeKeeper calls `sts:AssumeRole` to vend temporary credentials to Trino.
 - An AWS account that allows IAM users with access keys. LakeKeeper authenticates with one, and SCPs that block IAM users will stop the apply.
 - Credentials for Terraform that can do three things:
@@ -37,12 +37,27 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 2. Rename `terraform.tfvars.example` to `terraform.tfvars` and fill it in:
 
    ```hcl
-   region             = "us-east-1"
-   bucket_name        = "my-org-warehouse"
-   vpc_id             = "vpc-0123456789abcdef0"
+   region           = "us-east-1"
+   bucket_name      = "my-org-warehouse"
+   vpc_id           = "vpc-0123456789abcdef0"
+   eks_cluster_name = "my-cluster"
+
+   # Use the VPC's existing S3 gateway endpoint:
    s3_vpc_endpoint_id = "vpce-0123456789abcdef0"
-   eks_cluster_name   = "my-cluster"
+
+   # Or remove s3_vpc_endpoint_id and create one on the node subnet route tables:
+   # private_route_table_ids = ["rtb-0123456789abcdef0", "rtb-0fedcba9876543210"]
    ```
+
+   Find an existing endpoint with:
+
+   ```bash
+   aws ec2 describe-vpc-endpoints \
+     --filters Name=vpc-id,Values=<vpc-id> Name=service-name,Values=com.amazonaws.<region>.s3 \
+     --query 'VpcEndpoints[?VpcEndpointType==`Gateway`].VpcEndpointId'
+   ```
+
+   If you create one, list every route table your node subnets use. Traffic from a subnet whose route table isn't listed misses the endpoint and gets access denied. The new endpoint carries all same-region S3 traffic from those subnets, not only the warehouse's. With the default full-access endpoint policy that changes nothing for other buckets, and it usually cuts NAT data charges.
 
    Optional inputs:
    - `kms_key_arn`: encrypt the bucket with your own KMS key. Its key policy must let IAM policies in the account grant access.
@@ -57,6 +72,7 @@ To use one, start from the example for your cloud under [`examples/`](examples).
    ```
 
    This creates the following:
+   - the S3 gateway endpoint, if you didn't pass `s3_vpc_endpoint_id`
    - the bucket
    - the IAM user and its access key
    - the warehouse role LakeKeeper assumes
