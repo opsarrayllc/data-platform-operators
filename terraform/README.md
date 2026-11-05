@@ -2,7 +2,7 @@
 
 These modules create the Iceberg warehouse bucket, and the identity LakeKeeper and Trino use to reach it. They don't create the network or the cluster. You pass those in from the stack that already created them.
 
-To use one, start from the example for your cloud under [`examples/`](examples). Each example is a complete root module that pulls the released module from this repo by git tag. Copy the directory into your codebase, fill in `terraform.tfvars`, and apply. The AWS and GCP examples also create the Kubernetes Secret the `DataLake` reads, and print the `spec.storage` block to paste into it.
+To use one, start from the example for your cloud under [`examples/`](examples). Each example is a complete root module that pulls the released module from this repo by git tag. Copy the directory into your codebase, fill in `terraform.tfvars`, and apply. The AWS and GCP examples print the `spec.storage` block to paste into the `DataLake`. The GCP example also creates the Kubernetes Secret with the HMAC key it reads. On AWS, LakeKeeper uses EKS Pod Identity, so there is no access key or Secret.
 
 | Cloud | Example | Operator support |
 | --- | --- | --- |
@@ -17,10 +17,10 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 - An EKS cluster in a VPC, which the operator runs on.
 - An S3 **gateway** endpoint in that VPC, attached to the route tables of the node subnets. The bucket rejects object access from anywhere else. If you don't have one, the example can create it (see step 2). An interface endpoint won't work, because the operator doesn't point LakeKeeper or Trino at the endpoint's DNS name.
 - Outbound access from the nodes to AWS STS, through a NAT gateway or an STS interface endpoint. LakeKeeper calls `sts:AssumeRole` to vend temporary credentials to Trino.
-- An AWS account that allows IAM users with access keys. LakeKeeper authenticates with one, and SCPs that block IAM users will stop the apply.
+- The `eks-pod-identity-agent` add-on on the cluster. LakeKeeper gets its AWS identity from an EKS Pod Identity association, not an access key. Set `create_pod_identity_agent = true` to have the example install the add-on.
 - Credentials for Terraform that can do three things:
-  - manage S3 and IAM
-  - read the EKS cluster
+  - manage S3 and IAM, including `iam:PassRole` on the roles it creates
+  - read the EKS cluster and manage its Pod Identity associations
   - create a namespace and a Secret in the cluster, through an EKS access entry or `aws-auth`
 
 ### Steps
@@ -60,6 +60,7 @@ To use one, start from the example for your cloud under [`examples/`](examples).
    If you create one, list every route table your node subnets use. Traffic from a subnet whose route table isn't listed misses the endpoint and gets access denied. The new endpoint carries all same-region S3 traffic from those subnets, not only the warehouse's. With the default full-access endpoint policy that changes nothing for other buckets, and it usually cuts NAT data charges.
 
    Optional inputs:
+   - `create_pod_identity_agent`: install the `eks-pod-identity-agent` add-on.
    - `kms_key_arn`: encrypt the bucket with your own KMS key. Its key policy must let IAM policies in the account grant access.
    - `vpc_endpoint_bypass_principal_arns`: principals, such as an admin role, that may read objects from outside the VPC.
    - `tags`
@@ -74,12 +75,11 @@ To use one, start from the example for your cloud under [`examples/`](examples).
    This creates the following:
    - the S3 gateway endpoint, if you didn't pass `s3_vpc_endpoint_id`
    - the bucket
-   - the IAM user and its access key
-   - the warehouse role LakeKeeper assumes
+   - the `<name>-lakekeeper` role and its Pod Identity association with the `lakekeeper` ServiceAccount in the `lakekeeper` namespace
+   - the `<name>-warehouse` role, which only the LakeKeeper role can assume
    - the `lakekeeper` namespace
-   - the `warehouse-credentials` Secret
 
-   The access key is stored in Terraform state, so keep the state encrypted.
+   The operator creates the `lakekeeper` ServiceAccount and runs LakeKeeper as it. No AWS secret is stored in Terraform state or in the cluster.
 
 4. Print the spec fields and add them to your `DataLake`:
 
@@ -104,10 +104,13 @@ To use one, start from the example for your cloud under [`examples/`](examples).
          pathStyleAccess: false
          stsEnabled: true
          stsRoleARN: arn:aws:iam::123456789012:role/datalake-warehouse
-         credentialsSecretRef:
-           name: warehouse-credentials
-           namespace: lakekeeper
+         systemIdentity:
+           assumeRoleARN: arn:aws:iam::123456789012:role/datalake-warehouse
    ```
+
+   `systemIdentity` makes LakeKeeper store an `aws-system-identity` warehouse credential instead of an access key. LakeKeeper loads credentials from its pod, assumes the warehouse role for its own reads and writes, and assumes it again with a table-scoped policy to vend credentials to Trino.
+
+   If you set `sts_enabled = false` on the module, Trino gets no vended credentials. The module then associates the warehouse role with Trino's ServiceAccount (`default` in `trino`) too, and Trino reads S3 through its own Pod Identity.
 
 The operator reuses the `lakekeeper` namespace because it already exists. Because Terraform owns that namespace, `terraform destroy` also deletes LakeKeeper.
 
@@ -193,13 +196,13 @@ Its `lakekeeper_warehouse` output is a LakeKeeper create-warehouse body (`creden
 
 | Module | Required inputs | What it creates |
 | --- | --- | --- |
-| `modules/aws` | `bucket_name`, `region`, `vpc_id`, `s3_vpc_endpoint_id` | A bucket limited to that S3 endpoint. An IAM user and access key for LakeKeeper, and a role LakeKeeper assumes to vend temporary credentials to Trino. With `create_postgres`, an RDS for PostgreSQL instance, its subnet group, and a security group. |
+| `modules/aws` | `bucket_name`, `region`, `vpc_id`, `s3_vpc_endpoint_id`, `eks_cluster_name` | A bucket limited to that S3 endpoint. An EKS Pod Identity role and association for LakeKeeper, and a warehouse role it assumes for object access and to vend temporary credentials to Trino. With `create_postgres`, an RDS for PostgreSQL instance, its subnet group, and a security group. |
 | `modules/gcp` | `project_id`, `bucket_name`, `location`, `network`, `subnetwork`, `gke_cluster_name`, `gke_cluster_location` | A GCS bucket. A service account and HMAC key for the operator, and Workload Identity bindings for the cluster service accounts. The cluster must already have Workload Identity. |
 | `modules/azure` | `resource_group_name`, `location`, `storage_account_name`, `subnet_id`, `private_dns_zone_id`, `aks_oidc_issuer_url` | An ADLS Gen2 account, a private endpoint on that subnet, and an Entra app. The app has Storage Blob Data Contributor and Storage Blob Delegator, plus federated credentials for the cluster service accounts. The DNS zone must already be linked to the cluster virtual network. |
 
-The operator reads `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the Secret in `spec.storage.s3.credentialsSecretRef`. The AWS and GCP modules output those as `credentials_secret_data` if you'd rather create the Secret some other way.
+With static keys, the operator reads `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` from the Secret in `spec.storage.s3.credentialsSecretRef`. The GCP module outputs those as `credentials_secret_data` if you'd rather create the Secret some other way. The AWS module creates no keys and sets `spec.storage.s3.systemIdentity` instead.
 
-The AWS module doesn't set up IRSA, and only the LakeKeeper IAM user can assume the warehouse role. On GCP and Azure, `kubernetes_service_accounts` defaults to the `default` service account in the `lakekeeper` and `trino` namespaces. Those modules output `kubernetes_service_account_annotation` for those accounts.
+On AWS, only the LakeKeeper Pod Identity role can assume the warehouse role (plus Trino's Pod Identity when `sts_enabled` is false). To use IRSA instead of Pod Identity, set `systemIdentity.serviceAccountAnnotations` to `eks.amazonaws.com/role-arn: <role>`. On GCP and Azure, `kubernetes_service_accounts` defaults to the `default` service account in the `lakekeeper` and `trino` namespaces. Those modules output `kubernetes_service_account_annotation` for those accounts.
 
 ## Releases
 
@@ -212,7 +215,7 @@ Each release also attaches a zip of the module directory. The examples pin a tag
 
 ```hcl
 module "warehouse" {
-  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.1.0"
+  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v2.0.0"
 
   # ...
 }

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strconv"
 	"strings"
 
@@ -43,6 +44,10 @@ func (r *DataLakeReconciler) reconcileLakekeeper(
 	dp.Status.LakekeeperEndpoint = clusterServiceURL(nameLakekeeper, ns, lakekeeperPort)
 
 	if err := r.ensureEncryptionSecret(ctx, dp, ns); err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
+	if err := r.applyLakekeeperServiceAccount(ctx, dp, ns); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -84,6 +89,28 @@ func (r *DataLakeReconciler) ensureEncryptionSecret(
 	}
 	return r.ensureGeneratedSecret(ctx, dp, secretEncryption, ns, componentLakekeeper, map[string][]byte{
 		keyEncryption: []byte(key),
+	})
+}
+
+// applyLakekeeperServiceAccount gives LakeKeeper a dedicated identity, so an
+// EKS Pod Identity association or IRSA role reaches LakeKeeper and not the
+// other pods in its namespace, such as embedded Postgres.
+func (r *DataLakeReconciler) applyLakekeeperServiceAccount(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataLake,
+	ns string,
+) error {
+	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: nameLakekeeper, Namespace: ns}}
+	labels := labelsFor(dp, componentLakekeeper)
+	return r.apply(ctx, dp, sa, func() error {
+		ensureLabels(sa, labels)
+		if id := dp.Spec.Storage.AWSSystemIdentity(); id != nil {
+			if sa.Annotations == nil {
+				sa.Annotations = map[string]string{}
+			}
+			maps.Copy(sa.Annotations, id.ServiceAccountAnnotations)
+		}
+		return nil
 	})
 }
 
@@ -132,6 +159,7 @@ func (r *DataLakeReconciler) applyLakekeeperDeployment(
 		}
 		deploy.Spec.Replicas = ptr.To(spec.ReplicasOrDefault())
 		deploy.Spec.Template.Labels = labels
+		deploy.Spec.Template.Spec.ServiceAccountName = nameLakekeeper
 		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(0, 0)
 		waitForPostgres := corev1.Container{
 			Name:            "wait-for-postgres",
@@ -198,6 +226,7 @@ func lakekeeperEnv(dp *dataplatformv1alpha1.DataLake, conn postgresConn, oidc oi
 	if conn.SSLMode != "" {
 		env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__PG_SSL_MODE", Value: conn.SSLMode})
 	}
+	env = append(env, lakekeeperSystemIdentityEnv(dp)...)
 	if fga.enabled {
 		env = append(env,
 			corev1.EnvVar{Name: "LAKEKEEPER__AUTHZ_BACKEND", Value: "openfga"},
@@ -247,6 +276,28 @@ func lakekeeperUIScope(scope string) string {
 		return scope
 	}
 	return "openid " + scope
+}
+
+// lakekeeperSystemIdentityEnv lets LakeKeeper accept aws-system-identity
+// warehouse credentials, which load from the pod's AWS credential chain.
+// Without an assume role LakeKeeper must be allowed to use that identity
+// directly, and without an external ID it must not demand one.
+func lakekeeperSystemIdentityEnv(dp *dataplatformv1alpha1.DataLake) []corev1.EnvVar {
+	id := dp.Spec.Storage.AWSSystemIdentity()
+	if id == nil {
+		return nil
+	}
+	env := []corev1.EnvVar{
+		{Name: "LAKEKEEPER__ENABLE_AWS_SYSTEM_CREDENTIALS", Value: strconv.FormatBool(true)},
+		{Name: "AWS_REGION", Value: dp.Spec.Storage.S3.Region},
+	}
+	if id.AssumeRoleARN == "" {
+		env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__S3_ENABLE_DIRECT_SYSTEM_CREDENTIALS", Value: strconv.FormatBool(true)})
+	}
+	if id.ExternalID == "" {
+		env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__S3_REQUIRE_EXTERNAL_ID_FOR_SYSTEM_CREDENTIALS", Value: strconv.FormatBool(false)})
+	}
+	return env
 }
 
 func lakekeeperTrustedEngineEnv(oidc oidcConfig) []corev1.EnvVar {

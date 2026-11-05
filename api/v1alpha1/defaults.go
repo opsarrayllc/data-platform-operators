@@ -164,6 +164,15 @@ func (s *S3Spec) FlavorOrDefault() string {
 	return stringOrDefault(s.Flavor, DefaultS3Flavor)
 }
 
+// AWSSystemIdentity returns the external S3 system identity, or nil when the
+// warehouse uses embedded MinIO or static keys.
+func (s *StorageSpec) AWSSystemIdentity() *S3SystemIdentitySpec {
+	if s.IsEmbedded() || s.S3 == nil {
+		return nil
+	}
+	return s.S3.SystemIdentity
+}
+
 // AccessKeyIDKeyOrDefault returns the Secret key for the access key ID.
 func (s *S3CredentialsSecretRef) AccessKeyIDKeyOrDefault() string {
 	return stringOrDefault(s.AccessKeyIDKey, "AWS_ACCESS_KEY_ID")

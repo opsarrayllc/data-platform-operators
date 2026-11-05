@@ -26,7 +26,7 @@ variable "private_route_table_ids" {
 }
 
 variable "eks_cluster_name" {
-  description = "Existing EKS cluster the operator runs on. Terraform writes the credentials Secret to it."
+  description = "Existing EKS cluster the operator runs on. LakeKeeper gets an EKS Pod Identity association in it."
   type        = string
 }
 
@@ -42,14 +42,14 @@ variable "vpc_endpoint_bypass_principal_arns" {
   default     = []
 }
 
-variable "credentials_secret_name" {
-  description = "Name of the Secret that holds the warehouse access key."
-  type        = string
-  default     = "warehouse-credentials"
+variable "create_pod_identity_agent" {
+  description = "Install the eks-pod-identity-agent add-on. Leave false if the cluster already runs it."
+  type        = bool
+  default     = false
 }
 
-variable "credentials_secret_namespace" {
-  description = "Namespace for that Secret. Keep the default unless the DataLake sets spec.lakekeeper.namespace."
+variable "lakekeeper_namespace" {
+  description = "LakeKeeper namespace. Keep the default unless the DataLake sets spec.lakekeeper.namespace. The Postgres Secret goes here too."
   type        = string
   default     = "lakekeeper"
 }

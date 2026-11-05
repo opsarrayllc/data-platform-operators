@@ -37,18 +37,30 @@ locals {
   ]
 }
 
+# LakeKeeper authenticates with EKS Pod Identity, which needs this add-on on
+# the cluster. Leave create_pod_identity_agent false if it is already installed.
+resource "aws_eks_addon" "pod_identity_agent" {
+  count = var.create_pod_identity_agent ? 1 : 0
+
+  cluster_name = var.eks_cluster_name
+  addon_name   = "eks-pod-identity-agent"
+  tags         = var.tags
+}
+
 module "warehouse" {
-  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.1.0"
+  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v2.0.0"
 
   bucket_name                        = var.bucket_name
   region                             = var.region
   vpc_id                             = var.vpc_id
   s3_vpc_endpoint_id                 = local.s3_vpc_endpoint_id
+  eks_cluster_name                   = var.eks_cluster_name
+  lakekeeper_namespace               = var.lakekeeper_namespace
   kms_key_arn                        = var.kms_key_arn
   vpc_endpoint_bypass_principal_arns = var.vpc_endpoint_bypass_principal_arns
-  credentials_secret_name            = var.credentials_secret_name
-  credentials_secret_namespace       = var.credentials_secret_namespace
   tags                               = var.tags
+
+  postgres_credentials_secret_namespace = var.lakekeeper_namespace
 
   create_postgres                     = var.create_postgres
   postgres_subnet_ids                 = var.postgres_subnet_ids
@@ -56,22 +68,12 @@ module "warehouse" {
   postgres_instance_class             = var.postgres_instance_class
 }
 
-# The DataLake reads the warehouse access key from this Secret, so it has to
-# exist before the DataLake is applied. The operator reuses a namespace that
-# already exists. Destroying this namespace also deletes LakeKeeper.
+# The operator reuses a namespace that already exists. Destroying this
+# namespace also deletes LakeKeeper.
 resource "kubernetes_namespace_v1" "lakekeeper" {
   metadata {
-    name = var.credentials_secret_namespace
+    name = var.lakekeeper_namespace
   }
-}
-
-resource "kubernetes_secret_v1" "warehouse_credentials" {
-  metadata {
-    name      = var.credentials_secret_name
-    namespace = kubernetes_namespace_v1.lakekeeper.metadata[0].name
-  }
-
-  data = module.warehouse.credentials_secret_data
 }
 
 # The DataLake and Analytics resources read the RDS login from this Secret.

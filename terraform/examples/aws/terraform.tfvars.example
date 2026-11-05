@@ -9,6 +9,10 @@ s3_vpc_endpoint_id = "vpce-0123456789abcdef0"
 # Or remove s3_vpc_endpoint_id and create one on the node subnet route tables:
 # private_route_table_ids = ["rtb-0123456789abcdef0", "rtb-0fedcba9876543210"]
 
+# LakeKeeper uses EKS Pod Identity. Install the agent add-on if the cluster
+# does not run it yet:
+# create_pod_identity_agent = true
+
 # Optional: run the LakeKeeper catalog, OpenFGA, and Superset on RDS instead of
 # in-cluster Postgres. Use private subnets in at least two availability zones.
 # create_postgres     = true

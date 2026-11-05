@@ -44,6 +44,9 @@ type objectStore struct {
 	STSRoleARN      string
 	AccessKeyID     string
 	SecretAccessKey string
+	// SystemIdentity is set when LakeKeeper uses its pod's AWS identity
+	// instead of AccessKeyID and SecretAccessKey.
+	SystemIdentity *dataplatformv1alpha1.S3SystemIdentitySpec
 }
 
 func (r *DataLakeReconciler) reconcileObjectStore(
@@ -76,8 +79,21 @@ func (r *DataLakeReconciler) externalObjectStore(
 		setCondition(dp, dataplatformv1alpha1.ConditionMinioReady, metav1.ConditionFalse, reasonMissing, err.Error())
 		return objectStore{}, err
 	}
+	store := objectStore{
+		Bucket:          s3.Bucket,
+		Region:          s3.Region,
+		Endpoint:        s3.Endpoint,
+		PathStyleAccess: s3.PathStyleAccess,
+		Flavor:          s3.FlavorOrDefault(),
+		STSEnabled:      s3.STSEnabled,
+		STSRoleARN:      s3.STSRoleARN,
+	}
+	if s3.SystemIdentity != nil {
+		store.SystemIdentity = s3.SystemIdentity
+		return store, nil
+	}
 	if s3.CredentialsSecretRef == nil || s3.CredentialsSecretRef.Name == "" {
-		err := fmt.Errorf("spec.storage.s3.credentialsSecretRef is required when storage.embedded is false")
+		err := fmt.Errorf("spec.storage.s3.credentialsSecretRef or spec.storage.s3.systemIdentity is required when storage.embedded is false")
 		setCondition(dp, dataplatformv1alpha1.ConditionMinioReady, metav1.ConditionFalse, reasonMissing, err.Error())
 		return objectStore{}, err
 	}
@@ -92,17 +108,9 @@ func (r *DataLakeReconciler) externalObjectStore(
 		setCondition(dp, dataplatformv1alpha1.ConditionMinioReady, metav1.ConditionFalse, reasonError, err.Error())
 		return objectStore{}, err
 	}
-	return objectStore{
-		Bucket:          s3.Bucket,
-		Region:          s3.Region,
-		Endpoint:        s3.Endpoint,
-		PathStyleAccess: s3.PathStyleAccess,
-		Flavor:          s3.FlavorOrDefault(),
-		STSEnabled:      s3.STSEnabled,
-		STSRoleARN:      s3.STSRoleARN,
-		AccessKeyID:     accessKey,
-		SecretAccessKey: secretKey,
-	}, nil
+	store.AccessKeyID = accessKey
+	store.SecretAccessKey = secretKey
+	return store, nil
 }
 
 func (r *DataLakeReconciler) reconcileMinio(
