@@ -13,5 +13,6 @@
 !go.mod
 !go.sum
 
-# The analytics operator is a separate image.
+# The analytics and orchestration operators are separate modules and images.
 data-analytics-operator
+data-orchestration-operator

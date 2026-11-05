@@ -116,7 +116,7 @@ make -C "${ROOT}/data-analytics-operator" install KUBECONFIG="${KUBECONFIG_FILE}
 echo "==> Installing Orchestration CRDs"
 make -C "${ROOT}/data-orchestration-operator" install KUBECONFIG="${KUBECONFIG_FILE}"
 
-SUPERSET_IMG="${SUPERSET_IMG:-data-platform-superset:5.0.0}"
+SUPERSET_IMG="${SUPERSET_IMG:-ghcr.io/opsarrayllc/data-platform-superset:5.0.0}"
 echo "==> Building and loading Superset image ${SUPERSET_IMG}"
 make -C "${ROOT}" docker-build-superset SUPERSET_IMG="${SUPERSET_IMG}"
 "${KIND_BIN}" load docker-image "${SUPERSET_IMG}" --name "${CLUSTER}"

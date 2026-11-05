@@ -20,8 +20,10 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"net"
 	"net/url"
 	"slices"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -70,21 +72,17 @@ func (r *DataLakeReconciler) reconcileOpenFGA(ctx context.Context, dp *dataplatf
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
 		return openfgaConfig{}, false, err
 	}
-	if err := r.ensureOpenFGASecrets(ctx, dp, ns); err != nil {
+	embedded := spec.Postgres.IsEmbedded()
+	if err := r.ensureOpenFGASecrets(ctx, dp, ns, embedded); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
 		return openfgaConfig{}, false, err
 	}
-	if err := r.applyOpenFGAPostgres(ctx, dp, ns, spec.Postgres); err != nil {
+	conn, pgReady, err := r.reconcileOpenFGAPostgres(ctx, dp, ns, spec.Postgres)
+	if err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
 		return openfgaConfig{}, false, err
 	}
 	if err := r.applyOpenFGAService(ctx, dp, ns); err != nil {
-		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
-		return openfgaConfig{}, false, err
-	}
-
-	pgReady, err := r.statefulSetReady(ctx, ns, namePostgres)
-	if err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
 		return openfgaConfig{}, false, err
 	}
@@ -93,7 +91,7 @@ func (r *DataLakeReconciler) reconcileOpenFGA(ctx context.Context, dp *dataplatf
 		return openfgaConfig{enabled: true, endpoint: dp.Status.OpenFGAEndpoint, store: spec.StoreOrDefault()}, false, nil
 	}
 
-	if err := r.applyOpenFGADeployment(ctx, dp, ns, spec); err != nil {
+	if err := r.applyOpenFGADeployment(ctx, dp, ns, spec, conn); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionOpenFGAReady, metav1.ConditionFalse, reasonError, err.Error())
 		return openfgaConfig{}, false, err
 	}
@@ -186,7 +184,7 @@ func accessAuthzTypes(spec dataplatformv1alpha1.AuthzSpec) []AuthzType {
 	return types
 }
 
-func (r *DataLakeReconciler) ensureOpenFGASecrets(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
+func (r *DataLakeReconciler) ensureOpenFGASecrets(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string, embeddedPostgres bool) error {
 	apiKey, err := randomHex(32)
 	if err != nil {
 		return err
@@ -195,6 +193,9 @@ func (r *DataLakeReconciler) ensureOpenFGASecrets(ctx context.Context, dp *datap
 		keyOpenFGAAPIKey: []byte(apiKey),
 	}); err != nil {
 		return err
+	}
+	if !embeddedPostgres {
+		return nil
 	}
 	password, err := randomHex(16)
 	if err != nil {
@@ -205,6 +206,43 @@ func (r *DataLakeReconciler) ensureOpenFGASecrets(ctx context.Context, dp *datap
 		keyPostgresPassword: []byte(password),
 		keyPostgresDatabase: []byte("postgres"),
 	})
+}
+
+// reconcileOpenFGAPostgres returns OpenFGA's datastore connection and whether
+// it is ready. An external datastore is ready as soon as its credentials resolve;
+// the ensure-database init container waits for the server itself.
+func (r *DataLakeReconciler) reconcileOpenFGAPostgres(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataLake,
+	ns string,
+	spec dataplatformv1alpha1.PostgresSpec,
+) (postgresConn, bool, error) {
+	if !spec.IsEmbedded() {
+		conn, err := r.externalPostgres(ctx, dp, externalPostgresRequest{
+			spec:      spec,
+			field:     "authz.openfga.postgres",
+			condition: dataplatformv1alpha1.ConditionOpenFGAReady,
+			namespace: ns,
+			component: componentOpenFGAPostgres,
+			database:  spec.DatabaseOr(defaultOpenFGAExternalDatabase),
+		})
+		return conn, err == nil, err
+	}
+	if err := r.applyOpenFGAPostgres(ctx, dp, ns, spec); err != nil {
+		return postgresConn{}, false, err
+	}
+	ready, err := r.statefulSetReady(ctx, ns, namePostgres)
+	if err != nil {
+		return postgresConn{}, false, err
+	}
+	return postgresConn{
+		Host:     namePostgres,
+		Port:     postgresPort,
+		Database: "postgres",
+		Username: namePostgres,
+		SSLMode:  sslModeDisable,
+		Secret:   secretPostgres,
+	}, ready, nil
 }
 
 func (r *DataLakeReconciler) applyOpenFGAPostgres(
@@ -301,18 +339,14 @@ func (r *DataLakeReconciler) applyOpenFGADeployment(
 	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 	spec dataplatformv1alpha1.OpenFGASpec,
+	conn postgresConn,
 ) error {
-	password, err := r.getSecretData(ctx, secretPostgres, ns, keyPostgresPassword)
-	if err != nil {
-		return err
-	}
-	uri := fmt.Sprintf(
-		"postgres://%s:%s@%s:%d/postgres?sslmode=disable",
-		namePostgres, url.QueryEscape(password), namePostgres, postgresPort,
-	)
 	env := []corev1.EnvVar{
 		{Name: "OPENFGA_DATASTORE_ENGINE", Value: "postgres"},
-		{Name: "OPENFGA_DATASTORE_URI", Value: uri},
+		// Credentials stay out of the URI; OpenFGA adds them from these Secret-backed env vars.
+		{Name: "OPENFGA_DATASTORE_URI", Value: openfgaDatastoreURI(conn)},
+		secretEnv("OPENFGA_DATASTORE_USERNAME", conn.Secret, keyPostgresUsername),
+		secretEnv("OPENFGA_DATASTORE_PASSWORD", conn.Secret, keyPostgresPassword),
 		{Name: "OPENFGA_PLAYGROUND_ENABLED", Value: "false"},
 		{Name: "OPENFGA_AUTHN_METHOD", Value: "preshared"},
 		{
@@ -336,13 +370,24 @@ func (r *DataLakeReconciler) applyOpenFGADeployment(
 		deploy.Spec.Replicas = ptr.To(int32(1))
 		deploy.Spec.Template.Labels = labels
 		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(uidOpenFGA, gidOpenFGA)
-		deploy.Spec.Template.Spec.InitContainers = []corev1.Container{{
+		migrate := corev1.Container{
 			Name:            "migrate",
 			Image:           spec.ImageOrDefault(),
 			Args:            []string{"migrate"},
 			Env:             env,
 			SecurityContext: restrictedContainerSecurity(uidOpenFGA, gidOpenFGA),
-		}}
+		}
+		deploy.Spec.Template.Spec.InitContainers = []corev1.Container{migrate}
+		if conn.External {
+			deploy.Spec.Template.Spec.InitContainers = []corev1.Container{
+				ensureDatabaseContainer(spec.Postgres.ImageOrDefault(), conn),
+				migrate,
+			}
+			if deploy.Spec.Template.Annotations == nil {
+				deploy.Spec.Template.Annotations = map[string]string{}
+			}
+			deploy.Spec.Template.Annotations[annotationConfigHash] = conn.credentialsHash()
+		}
 		deploy.Spec.Template.Spec.Containers = []corev1.Container{{
 			Name:  nameOpenFGA,
 			Image: spec.ImageOrDefault(),
@@ -363,4 +408,19 @@ func (r *DataLakeReconciler) applyOpenFGADeployment(
 		}}
 		return nil
 	})
+}
+
+// openfgaDatastoreURI is the Postgres URI without credentials.
+func openfgaDatastoreURI(conn postgresConn) string {
+	sslMode := conn.SSLMode
+	if sslMode == "" {
+		sslMode = "prefer"
+	}
+	u := url.URL{
+		Scheme:   "postgres",
+		Host:     net.JoinHostPort(conn.Host, strconv.Itoa(int(conn.Port))),
+		Path:     "/" + conn.Database,
+		RawQuery: url.Values{"sslmode": {sslMode}}.Encode(),
+	}
+	return u.String()
 }

@@ -147,7 +147,7 @@ run: run-data-lake
 docker-build: ## Build docker image with the manager.
 	$(CONTAINER_TOOL) build -t ${IMG} .
 
-SUPERSET_IMG ?= data-platform-superset:5.0.0
+SUPERSET_IMG ?= ghcr.io/opsarrayllc/data-platform-superset:5.0.0
 
 .PHONY: docker-build-superset
 docker-build-superset: ## Build the Superset image with OAuth/Trino extras baked in.
@@ -183,8 +183,10 @@ HELM ?= helm
 HELM_CHART_DIR ?= deploy/data-lake-operator
 
 .PHONY: helm-sync
-helm-sync: manifests ## Sync generated CRDs and RBAC rules into the Helm chart.
+helm-sync: manifests ## Sync generated CRDs and RBAC rules into all three Helm charts.
 	./hack/sync-helm-manifests.sh config/crd/bases config/rbac/role.yaml $(HELM_CHART_DIR)
+	$(MAKE) -C data-analytics-operator helm-sync
+	$(MAKE) -C data-orchestration-operator helm-sync
 
 .PHONY: helm-lint
 helm-lint: helm-sync ## Lint the Helm chart.

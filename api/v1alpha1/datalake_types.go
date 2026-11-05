@@ -455,7 +455,8 @@ type OpenFGASpec struct {
 	// +optional
 	RowFilterStore string `json:"rowFilterStore,omitempty"`
 
-	// postgres is OpenFGA's metadata database.
+	// postgres is OpenFGA's datastore. Set embedded to false to use an external
+	// server, such as the RDS instance the AWS Terraform module can create.
 	// +optional
 	Postgres PostgresSpec `json:"postgres"`
 
@@ -609,9 +610,12 @@ type LakekeeperSpec struct {
 }
 
 // PostgresSpec is either an operator-managed instance or a pointer at an existing database.
+// LakeKeeper and OpenFGA each have one.
 type PostgresSpec struct {
-	// embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+	// embedded deploys a single-replica Postgres in the component's namespace.
 	// Defaults to true. Set false and fill host/credentials for an external database.
+	// When false, the operator creates the database on that server if it does not exist,
+	// so the credentials need CREATEDB or the database must already exist.
 	// +optional
 	Embedded *bool `json:"embedded,omitempty"`
 
@@ -631,8 +635,10 @@ type PostgresSpec struct {
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
-	// database name.
+	// database name. Defaults to "postgres" for LakeKeeper. For an external OpenFGA
+	// database it defaults to "openfga", so the two can share one server.
 	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z_][a-z0-9_]{0,62}$`
 	Database string `json:"database,omitempty"`
 
 	// sslMode is passed to the Postgres driver (disable, prefer, require, ...).
@@ -649,7 +655,7 @@ type PostgresCredentialsSecretRef struct {
 	// name of the Secret.
 	Name string `json:"name"`
 
-	// namespace of the Secret. Defaults to the LakeKeeper namespace.
+	// namespace of the Secret. Defaults to the component's namespace.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 

@@ -43,6 +43,34 @@ func (s *PostgresSpec) DatabaseOrDefault() string {
 	return stringOrDefault(s.Database, "superset")
 }
 
+// IsEmbedded reports whether Postgres should be operator-managed. Nil defaults to true.
+func (s *PostgresSpec) IsEmbedded() bool {
+	return s.Embedded == nil || *s.Embedded
+}
+
+// PortOrDefault returns the external Postgres port.
+func (s *PostgresSpec) PortOrDefault() int32 {
+	if s.Port == 0 {
+		return 5432
+	}
+	return s.Port
+}
+
+// SSLModeOrDefault returns the sslmode for an external database.
+func (s *PostgresSpec) SSLModeOrDefault() string {
+	return stringOrDefault(s.SSLMode, "prefer")
+}
+
+// UsernameKeyOrDefault returns the Secret key for the database user.
+func (s *PostgresCredentialsSecretRef) UsernameKeyOrDefault() string {
+	return stringOrDefault(s.UsernameKey, "username")
+}
+
+// PasswordKeyOrDefault returns the Secret key for the database password.
+func (s *PostgresCredentialsSecretRef) PasswordKeyOrDefault() string {
+	return stringOrDefault(s.PasswordKey, "password")
+}
+
 // ImageOrDefault returns the Redis image.
 func (s *RedisSpec) ImageOrDefault() string {
 	return stringOrDefault(s.Image, DefaultRedisImage)

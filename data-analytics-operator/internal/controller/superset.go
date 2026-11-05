@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -46,7 +45,9 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applySupersetPostgres(ctx, a, ns); err != nil {
+	conn, err := r.reconcileSupersetPostgres(ctx, a, ns)
+	if err != nil {
+		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -55,11 +56,7 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 		return err
 	}
 
-	cfg, cfgHash, err := r.supersetConfig(ctx, a, ns, oidc)
-	if err != nil {
-		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
-		return err
-	}
+	cfg, cfgHash := supersetConfig(a, oidc)
 	bootstrap := supersetBootstrapTrino(a)
 	if err := r.applySupersetConfigMap(ctx, a, ns, cfg, bootstrap); err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -69,23 +66,27 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applySupersetDeployment(ctx, a, ns, hashData(cfgHash, bootstrap)); err != nil {
+	if err := r.applySupersetDeployment(ctx, a, ns, conn, hashData(cfgHash, bootstrap, conn.CredentialsHash)); err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
 
-	pgReady, err := r.statefulSetReady(ctx, ns, namePostgres)
-	if err != nil {
-		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
-		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
-		return err
+	if conn.External {
+		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionTrue, reasonReady, "Using external Postgres")
+	} else {
+		pgReady, err := r.statefulSetReady(ctx, ns, namePostgres)
+		if err != nil {
+			setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
+			setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+		if !pgReady {
+			setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonNotReady, "Superset Postgres is not ready")
+			setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonNotReady, "Superset Postgres is not ready")
+			return nil
+		}
+		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionTrue, reasonReady, "Superset Postgres is ready")
 	}
-	if !pgReady {
-		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonNotReady, "Superset Postgres is not ready")
-		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonNotReady, "Superset Postgres is not ready")
-		return nil
-	}
-	setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionTrue, reasonReady, "Superset Postgres is ready")
 
 	redisReady, err := r.deploymentReady(ctx, ns, nameSupersetRedis)
 	if err != nil {
@@ -119,16 +120,18 @@ func (r *AnalyticsReconciler) ensureSupersetSecrets(
 	ns string,
 	oidc oidcConfig,
 ) error {
-	password, err := randomHex(16)
-	if err != nil {
-		return err
-	}
-	if err := r.ensureGeneratedSecret(ctx, a, secretPostgres, ns, componentSupersetPostgres, map[string][]byte{
-		keyPostgresUsername: []byte(namePostgres),
-		keyPostgresPassword: []byte(password),
-		keyPostgresDatabase: []byte(a.Spec.Postgres.DatabaseOrDefault()),
-	}); err != nil {
-		return err
+	if a.Spec.Postgres.IsEmbedded() {
+		password, err := randomHex(16)
+		if err != nil {
+			return err
+		}
+		if err := r.ensureGeneratedSecret(ctx, a, secretPostgres, ns, componentSupersetPostgres, map[string][]byte{
+			keyPostgresUsername: []byte(namePostgres),
+			keyPostgresPassword: []byte(password),
+			keyPostgresDatabase: []byte(a.Spec.Postgres.DatabaseOrDefault()),
+		}); err != nil {
+			return err
+		}
 	}
 
 	secretKey, err := randomHex(32)
@@ -311,7 +314,13 @@ func (r *AnalyticsReconciler) applySupersetService(ctx context.Context, a *analy
 	})
 }
 
-func (r *AnalyticsReconciler) applySupersetDeployment(ctx context.Context, a *analyticsv1alpha1.Analytics, ns, cfgHash string) error {
+func (r *AnalyticsReconciler) applySupersetDeployment(
+	ctx context.Context,
+	a *analyticsv1alpha1.Analytics,
+	ns string,
+	conn postgresConn,
+	cfgHash string,
+) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameSuperset, Namespace: ns}}
 	labels := labelsFor(a, componentSuperset)
 	return r.apply(ctx, a, deploy, func() error {
@@ -326,6 +335,12 @@ func (r *AnalyticsReconciler) applySupersetDeployment(ctx context.Context, a *an
 		deploy.Spec.Template.Annotations[annotationConfigHash] = cfgHash
 		deploy.Spec.Template.Labels = labels
 		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(uidSuperset, gidSuperset)
+		deploy.Spec.Template.Spec.InitContainers = nil
+		if conn.External {
+			deploy.Spec.Template.Spec.InitContainers = []corev1.Container{
+				ensureDatabaseContainer(a.Spec.Postgres.ImageOrDefault(), conn),
+			}
+		}
 		deploy.Spec.Template.Spec.Containers = []corev1.Container{{
 			Name:            nameSuperset,
 			Image:           a.Spec.ImageOrDefault(),
@@ -352,15 +367,6 @@ func (r *AnalyticsReconciler) applySupersetDeployment(ctx context.Context, a *an
 						SecretKeyRef: &corev1.SecretKeySelector{
 							LocalObjectReference: corev1.LocalObjectReference{Name: secretSuperset},
 							Key:                  keySupersetSecretKey,
-						},
-					},
-				},
-				{
-					Name: "DB_PASS",
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
-							Key:                  keyPostgresPassword,
 						},
 					},
 				},
@@ -404,7 +410,7 @@ func (r *AnalyticsReconciler) applySupersetDeployment(ctx context.Context, a *an
 						},
 					},
 				},
-			}, a.Spec.ExtraEnv...),
+			}, append(supersetDatabaseEnv(conn), a.Spec.ExtraEnv...)...),
 			VolumeMounts: []corev1.VolumeMount{{
 				Name:      volumeConfig,
 				MountPath: "/app/pythonpath",
@@ -434,24 +440,10 @@ func (r *AnalyticsReconciler) applySupersetDeployment(ctx context.Context, a *an
 	})
 }
 
-func (r *AnalyticsReconciler) supersetConfig(
-	ctx context.Context,
+func supersetConfig(
 	a *analyticsv1alpha1.Analytics,
-	ns string,
 	oidc oidcConfig,
-) (string, string, error) {
-	password, err := r.getSecretData(ctx, secretPostgres, ns, keyPostgresPassword)
-	if err != nil {
-		return "", "", err
-	}
-	dbURI := fmt.Sprintf(
-		"postgresql+psycopg2://%s:%s@%s:%d/%s",
-		namePostgres,
-		url.QueryEscape(password),
-		namePostgres,
-		postgresPort,
-		a.Spec.Postgres.DatabaseOrDefault(),
-	)
+) (string, string) {
 	redisURL := fmt.Sprintf("redis://%s:%d/0", nameSupersetRedis, redisPort)
 	trinoURI := fmt.Sprintf("trino://%s:%d/%s", a.Spec.Trino.HostOrDefault(), a.Spec.Trino.PortOrDefault(), a.Spec.Trino.CatalogOrDefault())
 
@@ -468,8 +460,17 @@ func (r *AnalyticsReconciler) supersetConfig(
 	var b strings.Builder
 	b.WriteString("# Generated by data-analytics-operator. Do not edit.\n")
 	b.WriteString("import os\n")
+	b.WriteString("from urllib.parse import quote_plus\n")
 	b.WriteString("from flask_appbuilder.security.manager import AUTH_DB, AUTH_OAUTH\n\n")
-	b.WriteString(fmt.Sprintf("SQLALCHEMY_DATABASE_URI = %q\n", dbURI))
+	// The password comes from a Secret-backed env var, so it never lands in this ConfigMap.
+	b.WriteString("SQLALCHEMY_DATABASE_URI = \"postgresql+psycopg2://{}:{}@{}:{}/{}?sslmode={}\".format(\n")
+	b.WriteString("    quote_plus(os.environ[\"DB_USER\"]),\n")
+	b.WriteString("    quote_plus(os.environ[\"DB_PASS\"]),\n")
+	b.WriteString("    os.environ[\"DB_HOST\"],\n")
+	b.WriteString("    os.environ[\"DB_PORT\"],\n")
+	b.WriteString("    os.environ[\"DB_NAME\"],\n")
+	b.WriteString("    os.environ.get(\"DB_SSLMODE\", \"prefer\"),\n")
+	b.WriteString(")\n")
 	b.WriteString("SECRET_KEY = os.environ.get(\"SUPERSET_SECRET_KEY\", \"change-me\")\n")
 	b.WriteString(fmt.Sprintf("REDIS_URL = %q\n", redisURL))
 	b.WriteString("CACHE_CONFIG = {\n")
@@ -553,7 +554,7 @@ func (r *AnalyticsReconciler) supersetConfig(
 	}
 
 	cfg := b.String()
-	return cfg, hashData(cfg), nil
+	return cfg, hashData(cfg)
 }
 
 func supersetBootstrapTrino(a *analyticsv1alpha1.Analytics) string {

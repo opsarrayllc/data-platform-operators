@@ -81,10 +81,10 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 
    The access key is stored in Terraform state, so keep the state encrypted.
 
-4. Print the storage block and add it to your `DataLake`:
+4. Print the spec fields and add them to your `DataLake`:
 
    ```bash
-   terraform output -raw datalake_storage_yaml | sed 's/^/  /'
+   terraform output -raw datalake_spec_yaml | sed 's/^/  /'
    ```
 
    The `sed` indents it to sit under `spec:`. The output has quoted keys, which is still valid YAML. With the defaults, the `DataLake` looks like this:
@@ -110,6 +110,49 @@ To use one, start from the example for your cloud under [`examples/`](examples).
    ```
 
 The operator reuses the `lakekeeper` namespace because it already exists. Because Terraform owns that namespace, `terraform destroy` also deletes LakeKeeper.
+
+### Optional: RDS Postgres
+
+By default each component runs its own single-replica Postgres in the cluster, on a PVC with no backups. Set `create_postgres = true` to put the LakeKeeper catalog, OpenFGA, and Superset on one RDS for PostgreSQL instance instead. Each gets its own database: `lakekeeper`, `openfga`, and `superset`.
+
+```hcl
+create_postgres     = true
+postgres_subnet_ids = ["subnet-0123456789abcdef0", "subnet-0fedcba9876543210"]
+```
+
+The defaults are PostgreSQL 17 on `db.t4g.micro`, single-AZ, with 20 GiB of gp3 storage that grows to 100 GiB, encryption at rest, and 7 days of backups. The databases hold only metadata, since table data lives in S3, so this is about $15 a month. Raise `postgres_instance_class` to `db.t4g.small` as Superset use grows. Set the module's `postgres_multi_az` for a standby in a second zone.
+
+What else to know:
+
+- **Network.** `postgres_subnet_ids` must be private subnets in at least two availability zones. Only `postgres_allowed_security_group_ids` can reach port 5432. It defaults to the EKS cluster security group, which managed node groups use. With self-managed nodes, list their security group.
+- **Databases are created in the cluster.** Terraform doesn't need a network path to RDS. Each component's pod runs an `ensure-database` init container that creates its database on first start.
+- **Credentials.** Terraform generates the master password and writes it to the `platform-postgres` Secret in the `lakekeeper` namespace. All three components use that one login. The operators copy it into each component's namespace and pass it to pods through Secret references, never as plain values. The password is in Terraform state too, so keep the state encrypted.
+- **New installs only.** Switching an existing platform from embedded to RDS doesn't move any data. The old in-cluster Postgres is left in place.
+- **Operator version.** OpenFGA and Superset need operator images that support an external database. That's the first operator release after this module version.
+- **Destroying.** Deletion protection is on. Set `postgres_deletion_protection = false` on the module and apply before you run `terraform destroy`. Destroy takes a final snapshot named `<name>-postgres-final`. Delete that snapshot before you create the instance again with the same `name`.
+
+With `create_postgres = true`, `datalake_spec_yaml` also includes `lakekeeper.postgres` and `authz.openfga.postgres`. Print the Analytics fields too:
+
+```bash
+terraform output -raw analytics_spec_yaml | sed 's/^/  /'
+```
+
+```yaml
+apiVersion: dataplatform.opsarray.io/v1alpha1
+kind: Analytics
+metadata:
+  name: analytics
+spec:
+  postgres:
+    embedded: false
+    host: datalake-postgres.abc123.us-east-1.rds.amazonaws.com
+    port: 5432
+    database: superset
+    sslMode: require
+    credentialsSecretRef:
+      name: platform-postgres
+      namespace: lakekeeper
+```
 
 ## Quick start: GCP
 
@@ -150,7 +193,7 @@ Its `lakekeeper_warehouse` output is a LakeKeeper create-warehouse body (`creden
 
 | Module | Required inputs | What it creates |
 | --- | --- | --- |
-| `modules/aws` | `bucket_name`, `region`, `vpc_id`, `s3_vpc_endpoint_id` | A bucket limited to that S3 endpoint. An IAM user and access key for LakeKeeper, and a role LakeKeeper assumes to vend temporary credentials to Trino. |
+| `modules/aws` | `bucket_name`, `region`, `vpc_id`, `s3_vpc_endpoint_id` | A bucket limited to that S3 endpoint. An IAM user and access key for LakeKeeper, and a role LakeKeeper assumes to vend temporary credentials to Trino. With `create_postgres`, an RDS for PostgreSQL instance, its subnet group, and a security group. |
 | `modules/gcp` | `project_id`, `bucket_name`, `location`, `network`, `subnetwork`, `gke_cluster_name`, `gke_cluster_location` | A GCS bucket. A service account and HMAC key for the operator, and Workload Identity bindings for the cluster service accounts. The cluster must already have Workload Identity. |
 | `modules/azure` | `resource_group_name`, `location`, `storage_account_name`, `subnet_id`, `private_dns_zone_id`, `aks_oidc_issuer_url` | An ADLS Gen2 account, a private endpoint on that subnet, and an Entra app. The app has Storage Blob Data Contributor and Storage Blob Delegator, plus federated credentials for the cluster service accounts. The DNS zone must already be linked to the cluster virtual network. |
 
@@ -169,7 +212,7 @@ Each release also attaches a zip of the module directory. The examples pin a tag
 
 ```hcl
 module "warehouse" {
-  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.0.1"
+  source = "git::https://github.com/opsarrayllc/data-platform-operators.git//terraform/modules/aws?ref=terraform-data-lake-aws-v1.1.0"
 
   # ...
 }

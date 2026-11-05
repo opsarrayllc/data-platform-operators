@@ -69,3 +69,43 @@ output "datalake_storage" {
     )
   }
 }
+
+locals {
+  postgres_ref = var.create_postgres ? {
+    embedded = false
+    host     = aws_db_instance.postgres[0].address
+    port     = local.postgres_port
+    sslMode  = "require"
+    credentialsSecretRef = {
+      name      = var.postgres_credentials_secret_name
+      namespace = var.credentials_secret_namespace
+    }
+  } : null
+}
+
+output "postgres_endpoint" {
+  description = "RDS host name. Null when create_postgres is false."
+  value       = var.create_postgres ? aws_db_instance.postgres[0].address : null
+}
+
+output "postgres_credentials_secret_data" {
+  description = "Kubernetes Secret data for the RDS master user. Keys match the operators' default usernameKey and passwordKey. Null when create_postgres is false."
+  sensitive   = true
+  value = var.create_postgres ? {
+    username = local.postgres_user
+    password = random_password.postgres[0].result
+  } : null
+}
+
+output "datalake_postgres" {
+  description = "DataLake fields for the RDS instance: lakekeeper is spec.lakekeeper.postgres and openfga is spec.authz.openfga.postgres. Null when create_postgres is false."
+  value = var.create_postgres ? {
+    lakekeeper = merge(local.postgres_ref, { database = "lakekeeper" })
+    openfga    = merge(local.postgres_ref, { database = "openfga" })
+  } : null
+}
+
+output "analytics_postgres" {
+  description = "Analytics spec.postgres for the RDS instance. Null when create_postgres is false."
+  value       = var.create_postgres ? merge(local.postgres_ref, { database = "superset" }) : null
+}

@@ -133,13 +133,21 @@ func (r *DataLakeReconciler) applyLakekeeperDeployment(
 		deploy.Spec.Replicas = ptr.To(spec.ReplicasOrDefault())
 		deploy.Spec.Template.Labels = labels
 		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(0, 0)
+		waitForPostgres := corev1.Container{
+			Name:            "wait-for-postgres",
+			Image:           spec.Postgres.ImageOrDefault(),
+			Command:         []string{"sh", "-c", pgWait},
+			SecurityContext: restrictedContainerSecurity(uidPostgres, gidPostgres),
+		}
+		if conn.External {
+			waitForPostgres = ensureDatabaseContainer(spec.Postgres.ImageOrDefault(), conn)
+			if deploy.Spec.Template.Annotations == nil {
+				deploy.Spec.Template.Annotations = map[string]string{}
+			}
+			deploy.Spec.Template.Annotations[annotationConfigHash] = conn.credentialsHash()
+		}
 		deploy.Spec.Template.Spec.InitContainers = []corev1.Container{
-			{
-				Name:            "wait-for-postgres",
-				Image:           spec.Postgres.ImageOrDefault(),
-				Command:         []string{"sh", "-c", pgWait},
-				SecurityContext: restrictedContainerSecurity(uidPostgres, gidPostgres),
-			},
+			waitForPostgres,
 			{
 				Name:            "migrate",
 				Image:           spec.ImageOrDefault(),
@@ -217,32 +225,9 @@ func lakekeeperEnv(dp *dataplatformv1alpha1.DataLake, conn postgresConn, oidc oi
 			)
 		}
 	}
-	if dp.Spec.Lakekeeper.Postgres.IsEmbedded() {
-		env = append(env,
-			corev1.EnvVar{
-				Name: "LAKEKEEPER__PG_USER",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
-						Key:                  keyPostgresUsername,
-					},
-				},
-			},
-			corev1.EnvVar{
-				Name: "LAKEKEEPER__PG_PASSWORD",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
-						Key:                  keyPostgresPassword,
-					},
-				},
-			},
-		)
-		return env
-	}
 	return append(env,
-		corev1.EnvVar{Name: "LAKEKEEPER__PG_USER", Value: conn.Username},
-		corev1.EnvVar{Name: "LAKEKEEPER__PG_PASSWORD", Value: conn.Password},
+		secretEnv("LAKEKEEPER__PG_USER", conn.Secret, keyPostgresUsername),
+		secretEnv("LAKEKEEPER__PG_PASSWORD", conn.Secret, keyPostgresPassword),
 	)
 }
 

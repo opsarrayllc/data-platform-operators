@@ -85,3 +85,61 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_postgres" {
+  description = "Create an RDS for PostgreSQL instance for the LakeKeeper catalog, OpenFGA, and Superset. Each gets its own database on it."
+  type        = bool
+  default     = false
+}
+
+variable "postgres_subnet_ids" {
+  description = "Private subnets for the RDS subnet group, in at least two availability zones. Required when create_postgres is true."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.postgres_subnet_ids : can(regex("^subnet-", id))])
+    error_message = "postgres_subnet_ids must be subnet ids."
+  }
+}
+
+variable "postgres_allowed_security_group_ids" {
+  description = "Security groups allowed to reach Postgres on 5432, such as the EKS cluster security group the nodes use. Required when create_postgres is true."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for id in var.postgres_allowed_security_group_ids : can(regex("^sg-", id))])
+    error_message = "postgres_allowed_security_group_ids must be security group ids."
+  }
+}
+
+variable "postgres_instance_class" {
+  description = "RDS instance class. db.t4g.micro is enough to start, since the databases hold only metadata. Use db.t4g.small or larger as Superset use grows."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "postgres_engine_version" {
+  description = "RDS for PostgreSQL major or exact version. 17 matches the operators' embedded Postgres."
+  type        = string
+  default     = "17"
+}
+
+variable "postgres_multi_az" {
+  description = "Run a standby in a second availability zone. Roughly doubles the instance cost."
+  type        = bool
+  default     = false
+}
+
+variable "postgres_deletion_protection" {
+  description = "Block deleting the instance. Set false and apply before terraform destroy."
+  type        = bool
+  default     = true
+}
+
+variable "postgres_credentials_secret_name" {
+  description = "Name of the Kubernetes Secret, in credentials_secret_namespace, that the DataLake and Analytics resources reference for Postgres. This module does not create the Secret."
+  type        = string
+  default     = "platform-postgres"
+}

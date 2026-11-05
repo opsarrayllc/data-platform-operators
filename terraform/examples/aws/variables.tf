@@ -59,3 +59,27 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+variable "create_postgres" {
+  description = "Create an RDS for PostgreSQL instance for the LakeKeeper catalog, OpenFGA, and Superset instead of running Postgres in the cluster."
+  type        = bool
+  default     = false
+}
+
+variable "postgres_subnet_ids" {
+  description = "Private subnets for RDS, in at least two availability zones. Required when create_postgres is true."
+  type        = list(string)
+  default     = []
+}
+
+variable "postgres_allowed_security_group_ids" {
+  description = "Security groups allowed to reach Postgres. Defaults to the EKS cluster security group, which managed node groups use."
+  type        = list(string)
+  default     = []
+}
+
+variable "postgres_instance_class" {
+  description = "RDS instance class."
+  type        = string
+  default     = "db.t4g.micro"
+}
