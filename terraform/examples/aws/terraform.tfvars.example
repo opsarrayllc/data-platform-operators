@@ -1,5 +1,10 @@
-region             = "us-east-1"
-bucket_name        = "my-org-warehouse"
-vpc_id             = "vpc-0123456789abcdef0"
+region           = "us-east-1"
+bucket_name      = "my-org-warehouse"
+vpc_id           = "vpc-0123456789abcdef0"
+eks_cluster_name = "my-cluster"
+
+# Use the VPC's existing S3 gateway endpoint:
 s3_vpc_endpoint_id = "vpce-0123456789abcdef0"
-eks_cluster_name   = "my-cluster"
+
+# Or remove s3_vpc_endpoint_id and create one on the node subnet route tables:
+# private_route_table_ids = ["rtb-0123456789abcdef0", "rtb-0fedcba9876543210"]

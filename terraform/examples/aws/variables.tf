@@ -14,8 +14,15 @@ variable "vpc_id" {
 }
 
 variable "s3_vpc_endpoint_id" {
-  description = "Existing S3 gateway endpoint in vpc_id, attached to the route tables of the node subnets."
+  description = "Existing S3 gateway endpoint in vpc_id, attached to the route tables of the node subnets. Leave null to create one on private_route_table_ids."
   type        = string
+  default     = null
+}
+
+variable "private_route_table_ids" {
+  description = "Route tables of the EKS node subnets. Used only when s3_vpc_endpoint_id is null, to attach the S3 gateway endpoint this example creates."
+  type        = list(string)
+  default     = []
 }
 
 variable "eks_cluster_name" {
