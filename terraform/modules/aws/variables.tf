@@ -42,9 +42,9 @@ variable "trino_namespace" {
 }
 
 variable "trino_service_account" {
-  description = "ServiceAccount of the Trino pods. Used only when sts_enabled is false."
+  description = "ServiceAccount of the Trino pods. The operator runs Trino as trino. Used only when sts_enabled is false."
   type        = string
-  default     = "default"
+  default     = "trino"
 }
 
 variable "vpc_id" {

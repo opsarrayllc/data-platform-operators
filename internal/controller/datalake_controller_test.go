@@ -26,6 +26,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -520,6 +521,85 @@ var _ = Describe("DataLake Controller", func() {
 		props := string(catalogSecret.Data[nameLakekeeper+".properties"])
 		Expect(props).To(ContainSubstring("iceberg.rest-catalog.vended-credentials-enabled=true"))
 		Expect(props).NotTo(ContainSubstring("s3.aws-access-key"))
+	})
+
+	It("authenticates machines to LakeKeeper with ServiceAccount tokens", func() {
+		resource := &dataplatformv1alpha1.DataLake{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+		Eventually(func() bool {
+			return errors.IsNotFound(k8sClient.Get(ctx, typeNamespacedName, resource))
+		}).Should(BeTrue())
+
+		catalog.grants = nil
+		withTokens := &dataplatformv1alpha1.DataLake{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			Spec: dataplatformv1alpha1.DataLakeSpec{
+				Auth: dataplatformv1alpha1.AuthSpec{
+					ServiceAccountTokens: &dataplatformv1alpha1.ServiceAccountTokensSpec{},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, withTokens)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		bringUpOpenFGA(ctx, reconciler, typeNamespacedName)
+		markDeploymentReady(ctx, nameLakekeeper, nameLakekeeper)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("letting LakeKeeper review Kubernetes tokens")
+		lk := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameLakekeeper, Namespace: nameLakekeeper}, lk)).To(Succeed())
+		env := lk.Spec.Template.Spec.Containers[0].Env
+		Expect(envValue(env, "LAKEKEEPER__ENABLE_KUBERNETES_AUTHENTICATION")).To(Equal("true"))
+		Expect(envValue(env, "LAKEKEEPER__KUBERNETES_AUTHENTICATION_AUDIENCE")).To(Equal("lakekeeper"))
+		Expect(envValue(env, "LAKEKEEPER__KUBERNETES_AUTHENTICATION_SUBJECT_SOURCE")).To(Equal("username"))
+		Expect(envValue(env, "LAKEKEEPER__TRUSTED_ENGINES__TRINO__IDENTITIES__KUBERNETES__SUBJECTS")).To(
+			Equal("[system:serviceaccount:trino:trino,system:serviceaccount:openfga:opa]"))
+		binding := &rbacv1.ClusterRoleBinding{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: resourceName + "-lakekeeper-tokenreview"}, binding)).To(Succeed())
+		Expect(binding.RoleRef.Name).To(Equal("system:auth-delegator"))
+		Expect(binding.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "ServiceAccount", Name: nameLakekeeper, Namespace: nameLakekeeper}))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameOperatorServiceAccount, Namespace: nameLakekeeper}, &corev1.ServiceAccount{})).To(Succeed())
+
+		By("pointing Trino's catalog at the token sidecar")
+		catalogSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoCatalog, Namespace: nameTrino}, catalogSecret)).To(Succeed())
+		props := string(catalogSecret.Data[nameLakekeeper+".properties"])
+		Expect(props).To(ContainSubstring("iceberg.rest-catalog.oauth2.server-uri=http://127.0.0.1:8099/cgi-bin/token"))
+		Expect(props).To(ContainSubstring("iceberg.rest-catalog.oauth2.credential=trino:serviceaccount"))
+		Expect(props).NotTo(ContainSubstring("iceberg.rest-catalog.oauth2.scope"))
+
+		trino := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameTrino, Namespace: nameTrino}, trino)).To(Succeed())
+		pod := trino.Spec.Template.Spec
+		Expect(pod.ServiceAccountName).To(Equal(nameTrino))
+		Expect(pod.Containers).To(HaveLen(2))
+		Expect(pod.Containers[1].Image).To(Equal(dataplatformv1alpha1.DefaultTokenProxyImage))
+		var projected *corev1.ServiceAccountTokenProjection
+		for _, v := range pod.Volumes {
+			if v.Projected != nil {
+				projected = v.Projected.Sources[0].ServiceAccountToken
+			}
+		}
+		Expect(projected).NotTo(BeNil())
+		Expect(projected.Audience).To(Equal("lakekeeper"))
+		proxy := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTokenProxy, Namespace: nameTrino}, proxy)).To(Succeed())
+		Expect(proxy.Data[keyTokenProxyScript]).To(ContainSubstring(`"access_token":"%s"`))
+
+		By("pointing OPA at its own sidecar")
+		opa := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameOPA, Namespace: nameOpenFGA}, opa)).To(Succeed())
+		Expect(opa.Spec.Template.Spec.ServiceAccountName).To(Equal(nameOPA))
+		Expect(envValue(opa.Spec.Template.Spec.Containers[0].Env, "LAKEKEEPER_TOKEN_ENDPOINT")).To(Equal("http://127.0.0.1:8099/cgi-bin/token"))
+		Expect(opa.Spec.Template.Spec.Containers).To(HaveLen(2))
+
+		By("granting the ServiceAccount principals")
+		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:trino:trino=/project_admin"))
+		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:openfga:opa=/security_admin"))
 	})
 
 	It("rejects static keys and a system identity together", func() {

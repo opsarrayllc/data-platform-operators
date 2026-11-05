@@ -69,11 +69,23 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != ""); err != nil {
+	// A dedicated account keeps Trino's identity (LakeKeeper principal, cloud
+	// role association) apart from anything else in the namespace.
+	if err := r.ensureServiceAccount(ctx, dp, ns, nameTrino, componentTrinoCoordinator, nil); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.reconcileTrinoWorkers(ctx, dp, ns, cfgHash); err != nil {
+	if oidc.serviceAccounts.enabled {
+		if err := r.applyTokenProxyConfigMap(ctx, dp, ns, componentTrinoCoordinator); err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+	}
+	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != "", oidc.serviceAccounts); err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
+	if err := r.reconcileTrinoWorkers(ctx, dp, ns, cfgHash, oidc.serviceAccounts); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -249,10 +261,16 @@ func lakekeeperCatalogProperties(dp *dataplatformv1alpha1.DataLake, store object
 	}
 	if oidc.enabled {
 		props["iceberg.rest-catalog.security"] = "OAUTH2"
-		props["iceberg.rest-catalog.oauth2.credential"] = oidc.trinoClientID + ":" + oidc.trinoSecret
-		props["iceberg.rest-catalog.oauth2.server-uri"] = oidc.tokenURL
-		if oidc.scope != "" {
-			props["iceberg.rest-catalog.oauth2.scope"] = oidc.scope
+		props["iceberg.rest-catalog.oauth2.server-uri"] = oidc.machineTokenURL()
+		if oidc.serviceAccounts.enabled {
+			// The token sidecar ignores the credential, but the connector
+			// requires one to start the client-credentials flow.
+			props["iceberg.rest-catalog.oauth2.credential"] = nameTrino + ":serviceaccount"
+		} else {
+			props["iceberg.rest-catalog.oauth2.credential"] = oidc.trinoClientID + ":" + oidc.trinoSecret
+			if oidc.scope != "" {
+				props["iceberg.rest-catalog.oauth2.scope"] = oidc.scope
+			}
 		}
 	}
 	// With a system identity and no STS, Trino falls back to its own default
@@ -335,6 +353,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
 	oauth, opa bool,
+	sa serviceAccountTokens,
 ) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameTrino, Namespace: ns}}
 	labels := labelsFor(dp, componentTrinoCoordinator)
@@ -356,6 +375,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 			dp.Spec.Trino.ExtraEnv,
 			oauth,
 			opa,
+			sa,
 		)
 		return nil
 	})
@@ -365,6 +385,7 @@ func (r *DataLakeReconciler) reconcileTrinoWorkers(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
+	sa serviceAccountTokens,
 ) error {
 	workers := dp.Spec.Trino.WorkersOrDefault()
 	if workers == 0 {
@@ -400,12 +421,21 @@ func (r *DataLakeReconciler) reconcileTrinoWorkers(
 			dp.Spec.Trino.ExtraEnv,
 			false,
 			false,
+			sa,
 		)
 		return nil
 	})
 }
 
-func trinoPodSpec(image, configKey string, resources corev1.ResourceRequirements, env []corev1.EnvVar, oauth, opa bool) corev1.PodSpec {
+// trinoPodSpec builds coordinator and worker pods. Workers get the token
+// sidecar too, because every node initializes the Iceberg REST catalog.
+func trinoPodSpec(
+	image, configKey string,
+	resources corev1.ResourceRequirements,
+	env []corev1.EnvVar,
+	oauth, opa bool,
+	sa serviceAccountTokens,
+) corev1.PodSpec {
 	probe := corev1.ProbeHandler{
 		HTTPGet: &corev1.HTTPGetAction{
 			Path: "/v1/info",
@@ -428,8 +458,9 @@ func trinoPodSpec(image, configKey string, resources corev1.ResourceRequirements
 			SubPath:   "access-control.properties",
 		})
 	}
-	return corev1.PodSpec{
-		SecurityContext: restrictedPodSecurity(uidTrino, gidTrino),
+	spec := corev1.PodSpec{
+		ServiceAccountName: nameTrino,
+		SecurityContext:    restrictedPodSecurity(uidTrino, gidTrino),
 		Containers: []corev1.Container{{
 			Name:         nameTrino,
 			Image:        image,
@@ -458,4 +489,8 @@ func trinoPodSpec(image, configKey string, resources corev1.ResourceRequirements
 			},
 		},
 	}
+	if sa.enabled {
+		withTokenProxy(&spec, sa)
+	}
+	return spec
 }

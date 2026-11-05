@@ -102,10 +102,25 @@ type OIDCSpec struct {
 	Issuer string `json:"issuer,omitempty"`
 
 	// publicIssuer is the issuer browsers and tokens use. This string is the
-	// token's iss claim. Defaults to issuer.
-	// Example: https://keycloak.data-platform.local/realms/dataplatform.
+	// token's iss claim, so keep any trailing slash. Defaults to issuer.
+	// Example (Keycloak): https://keycloak.data-platform.local/realms/dataplatform.
+	// Example (JumpCloud): https://oauth.id.jumpcloud.com/
 	// +optional
 	PublicIssuer string `json:"publicIssuer,omitempty"`
+
+	// caConfigMapName names a ConfigMap in spec.namespace whose ca.crt key
+	// holds extra CA certificates Argo trusts when it calls the issuer, such
+	// as a private or mkcert CA. The system roots stay trusted. Restart
+	// argo-server after you change the ConfigMap.
+	// +optional
+	CAConfigMapName string `json:"caConfigMapName,omitempty"`
+
+	// groupsClaim is the ID token claim that lists the user's groups, which
+	// map to Argo roles: platform-admins, data-engineers, and analysts. In
+	// JumpCloud, set the application's group attribute name to this value.
+	// Defaults to "groups".
+	// +optional
+	GroupsClaim string `json:"groupsClaim,omitempty"`
 
 	// credentialsSecretRef points at a Secret with the Argo confidential-client
 	// credentials. The data lake operator writes these into the Keycloak

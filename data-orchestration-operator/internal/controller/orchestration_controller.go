@@ -120,6 +120,7 @@ func (r *OrchestrationReconciler) SetupWithManager(mgr ctrl.Manager) error {
 type oidcConfig struct {
 	enabled      bool
 	publicIssuer string
+	groupsClaim  string
 	clientID     string
 	clientSecret string
 	publicURL    string
@@ -150,13 +151,15 @@ func (r *OrchestrationReconciler) resolveOIDC(ctx context.Context, o *orchestrat
 		return oidcConfig{}, err
 	}
 
-	publicIssuer := strings.TrimRight(spec.PublicIssuer, "/")
+	// Argo compares this string to the token's iss claim, so keep it verbatim.
+	publicIssuer := spec.PublicIssuer
 	if publicIssuer == "" {
-		publicIssuer = strings.TrimRight(spec.Issuer, "/")
+		publicIssuer = spec.Issuer
 	}
 	return oidcConfig{
 		enabled:      true,
 		publicIssuer: publicIssuer,
+		groupsClaim:  spec.GroupsClaimOrDefault(),
 		clientID:     clientID,
 		clientSecret: clientSecret,
 		publicURL:    strings.TrimRight(o.Spec.PublicURL, "/"),
@@ -251,9 +254,10 @@ func controllerConfig(oidc oidcConfig) string {
     - openid
     - profile
     - email
+  customGroupClaimName: %s
   rbac:
     enabled: true
-`, oidc.publicIssuer, secretSSO, keySSOClientID, secretSSO, keySSOClientSecret, oidc.publicURL)
+`, oidc.publicIssuer, secretSSO, keySSOClientID, secretSSO, keySSOClientSecret, oidc.publicURL, oidc.groupsClaim)
 	return b.String()
 }
 
@@ -263,6 +267,11 @@ func (r *OrchestrationReconciler) keycloakHostAliases(ctx context.Context, oidc 
 	}
 	parsed, err := url.Parse(oidc.publicIssuer)
 	if err != nil || parsed.Hostname() == "" {
+		return nil, nil
+	}
+	// Only local development names resolve through the cluster ingress. A
+	// real provider such as oauth.id.jumpcloud.com must use public DNS.
+	if !strings.HasSuffix(parsed.Hostname(), ".local") {
 		return nil, nil
 	}
 	svc := &corev1.Service{}

@@ -312,9 +312,30 @@ func (r *OrchestrationReconciler) applyServerDeployment(ctx context.Context, o *
 			Name:         "tmp",
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		}}
+		mounts := []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}}
+		var env []corev1.EnvVar
 		mode := "server"
 		if sso {
 			mode = "sso"
+			if caName := o.Spec.Auth.OIDC.CAConfigMapName; caName != "" {
+				// Go reads SSL_CERT_DIR in addition to the system bundle file,
+				// so the extra CA does not replace the public roots. Mount the
+				// key as a plain file: Go skips the ConfigMap volume's
+				// symlinks when it scans a directory.
+				deploy.Spec.Template.Spec.Volumes = append(deploy.Spec.Template.Spec.Volumes, corev1.Volume{
+					Name: volumeOIDCCA,
+					VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+						LocalObjectReference: corev1.LocalObjectReference{Name: caName},
+					}},
+				})
+				mounts = append(mounts, corev1.VolumeMount{
+					Name:      volumeOIDCCA,
+					MountPath: oidcCADir + "/" + keyOIDCCA,
+					SubPath:   keyOIDCCA,
+					ReadOnly:  true,
+				})
+				env = append(env, corev1.EnvVar{Name: "SSL_CERT_DIR", Value: oidcCADir})
+			}
 		}
 		deploy.Spec.Template.Spec.Containers = []corev1.Container{{
 			Name:            nameServer,
@@ -330,7 +351,8 @@ func (r *OrchestrationReconciler) applyServerDeployment(ctx context.Context, o *
 				InitialDelaySeconds: 10,
 				PeriodSeconds:       20,
 			},
-			VolumeMounts: []corev1.VolumeMount{{Name: "tmp", MountPath: "/tmp"}},
+			Env:          env,
+			VolumeMounts: mounts,
 		}}
 		return nil
 	})

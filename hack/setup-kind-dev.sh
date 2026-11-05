@@ -14,6 +14,7 @@ KUBECTL_BIN="${KUBECTL:-kubectl}"
 CERT_DIR="${KIND_CERT_DIR:-${ROOT}/bin/certs}"
 KUBECONFIG_FILE="${KIND_KUBECONFIG:-${ROOT}/bin/kubeconfig-${CLUSTER}}"
 TLS_SECRET="${KIND_TLS_SECRET:-data-platform-tls}"
+CA_CONFIGMAP="${KIND_CA_CONFIGMAP:-data-platform-ca}"
 NAMESPACES=(keycloak lakekeeper trino openfga superset minio argo)
 HOSTS=(keycloak lakekeeper trino openfga opa superset minio argo)
 
@@ -56,6 +57,16 @@ fi
 "${KIND_BIN}" export kubeconfig --name "${CLUSTER}" --kubeconfig "${KUBECONFIG_FILE}"
 "${KIND_BIN}" export kubeconfig --name "${CLUSTER}"
 
+# Pods inherit the host's DNS search domains, and with ndots:5 every lookup
+# tries them first. A home router with a wildcard record for its search domain
+# (*.router.example) then answers for real names such as oauth.id.jumpcloud.com.
+# Drop the search line from each node; Docker leaves an edited file alone. The
+# file is a bind mount, so rewrite it in place instead of sed -i's rename.
+echo "==> Removing host DNS search domains from kind nodes"
+for node in $("${KIND_BIN}" get nodes --name "${CLUSTER}"); do
+	docker exec "${node}" sh -c 'grep -v "^search " /etc/resolv.conf > /tmp/resolv.conf && cat /tmp/resolv.conf > /etc/resolv.conf'
+done
+
 echo "==> Installing ingress-nginx"
 kc apply -f "${INGRESS_MANIFEST}"
 kc -n ingress-nginx rollout status deployment/ingress-nginx-controller --timeout=180s
@@ -90,6 +101,11 @@ for ns in "${NAMESPACES[@]}"; do
 	kc create namespace "${ns}" --dry-run=client -o yaml | kc apply -f -
 	kc create secret tls "${TLS_SECRET}" \
 		--cert="${CERT_DIR}/tls.crt" --key="${CERT_DIR}/tls.key" \
+		-n "${ns}" --dry-run=client -o yaml | kc apply -f -
+	# Pods that call https://*.data-platform.local through the ingress (Argo's
+	# OIDC discovery) trust the mkcert root through this ConfigMap.
+	kc create configmap "${CA_CONFIGMAP}" \
+		--from-file=ca.crt="$(mkcert -CAROOT)/rootCA.pem" \
 		-n "${ns}" --dry-run=client -o yaml | kc apply -f -
 done
 
