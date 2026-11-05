@@ -510,6 +510,8 @@ type MinioSpec struct {
 }
 
 // S3Spec is the warehouse object-store profile.
+// +kubebuilder:validation:XValidation:rule="!(has(self.credentialsSecretRef) && has(self.systemIdentity))",message="set credentialsSecretRef or systemIdentity, not both"
+// +kubebuilder:validation:XValidation:rule="!has(self.systemIdentity) || !has(self.flavor) || self.flavor == 'aws'",message="systemIdentity requires flavor aws"
 type S3Spec struct {
 	// bucket is the S3 bucket name.
 	// +kubebuilder:validation:MinLength=1
@@ -543,9 +545,39 @@ type S3Spec struct {
 
 	// credentialsSecretRef points at a Secret with static S3 keys.
 	// Namespace is required because DataLake is cluster-scoped.
-	// Required when using an external store (storage.embedded=false).
+	// Required when using an external store (storage.embedded=false), unless
+	// systemIdentity is set.
 	// +optional
 	CredentialsSecretRef *S3CredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+
+	// systemIdentity has LakeKeeper reach AWS with its pod's own identity, such
+	// as EKS Pod Identity or IRSA, instead of static keys. The LakeKeeper pods
+	// run as the "lakekeeper" ServiceAccount in the LakeKeeper namespace, so
+	// associate the IAM role with that account. Trino receives vended
+	// credentials when stsEnabled is true; otherwise Trino uses its own default
+	// AWS credential chain.
+	// +optional
+	SystemIdentity *S3SystemIdentitySpec `json:"systemIdentity,omitempty"`
+}
+
+// S3SystemIdentitySpec configures LakeKeeper's AWS system identity.
+type S3SystemIdentitySpec struct {
+	// assumeRoleARN is the role LakeKeeper assumes with its pod identity for
+	// its own reads and writes. Empty uses the pod identity directly, which then
+	// needs access to the bucket. When stsEnabled is true, stsRoleARN defaults
+	// to this role.
+	// +optional
+	AssumeRoleARN string `json:"assumeRoleARN,omitempty"`
+
+	// externalID is sent when LakeKeeper assumes assumeRoleARN or stsRoleARN.
+	// Leave empty when the role's trust policy does not require one.
+	// +optional
+	ExternalID string `json:"externalID,omitempty"`
+
+	// serviceAccountAnnotations are set on the LakeKeeper ServiceAccount, for
+	// example eks.amazonaws.com/role-arn for IRSA. EKS Pod Identity needs none.
+	// +optional
+	ServiceAccountAnnotations map[string]string `json:"serviceAccountAnnotations,omitempty"`
 }
 
 // S3CredentialsSecretRef locates a Secret that holds AWS-style access keys.

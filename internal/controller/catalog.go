@@ -114,6 +114,11 @@ type WarehouseRequest struct {
 	STSRoleARN      string
 	AccessKeyID     string
 	SecretAccessKey string
+	// SystemIdentity stores an aws-system-identity credential instead of the
+	// access key, so LakeKeeper uses its pod's AWS identity.
+	SystemIdentity bool
+	AssumeRoleARN  string
+	ExternalID     string
 }
 
 type proxyCatalogClient struct {
@@ -663,15 +668,28 @@ func warehouseCreateJSON(req WarehouseRequest) map[string]any {
 	if req.STSRoleARN != "" {
 		profile["sts-role-arn"] = req.STSRoleARN
 	}
+	credential := map[string]any{
+		"type":                  "s3", //nolint:goconst
+		"credential-type":       "access-key",
+		"aws-access-key-id":     req.AccessKeyID,
+		"aws-secret-access-key": req.SecretAccessKey,
+	}
+	if req.SystemIdentity {
+		credential = map[string]any{
+			"type":            "s3", //nolint:goconst
+			"credential-type": "aws-system-identity",
+		}
+		if req.ExternalID != "" {
+			credential["external-id"] = req.ExternalID
+		}
+		if req.AssumeRoleARN != "" {
+			profile["assume-role-arn"] = req.AssumeRoleARN
+		}
+	}
 	return map[string]any{
-		"warehouse-name":  req.Name,
-		"storage-profile": profile,
-		"storage-credential": map[string]any{
-			"type":                  "s3", //nolint:goconst
-			"credential-type":       "access-key",
-			"aws-access-key-id":     req.AccessKeyID,
-			"aws-secret-access-key": req.SecretAccessKey,
-		},
+		"warehouse-name":     req.Name,
+		"storage-profile":    profile,
+		"storage-credential": credential,
 	}
 }
 

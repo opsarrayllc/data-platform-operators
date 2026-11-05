@@ -69,6 +69,11 @@ func (r *DataLakeReconciler) reconcileWarehouse(ctx context.Context, dp *datapla
 		AccessKeyID:     store.AccessKeyID,
 		SecretAccessKey: store.SecretAccessKey,
 	}
+	if id := store.SystemIdentity; id != nil {
+		req.SystemIdentity = true
+		req.AssumeRoleARN = id.AssumeRoleARN
+		req.ExternalID = id.ExternalID
+	}
 	if err := r.Catalog.EnsureWarehouse(ctx, ns, nameLakekeeper, lakekeeperPort, token, req); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err

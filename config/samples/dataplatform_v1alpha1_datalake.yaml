@@ -27,6 +27,10 @@ spec:
     #   credentialsSecretRef:
     #     name: s3-credentials
     #     namespace: lakekeeper
+    #   # On AWS, use LakeKeeper's EKS Pod Identity instead of credentialsSecretRef.
+    #   # Associate the IAM role with the lakekeeper ServiceAccount.
+    #   systemIdentity:
+    #     assumeRoleARN: arn:aws:iam::123456789012:role/datalake-warehouse
   # Identity. Keycloak is deployed by default.
   # Set embedded: false and fill oidc for Okta, JumpCloud, or another IdP.
   # Embedded Keycloak ships groups platform-admins, data-engineers, and analysts.

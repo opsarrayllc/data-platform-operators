@@ -983,7 +983,8 @@ spec:
                         description: |-
                           credentialsSecretRef points at a Secret with static S3 keys.
                           Namespace is required because DataLake is cluster-scoped.
-                          Required when using an external store (storage.embedded=false).
+                          Required when using an external store (storage.embedded=false), unless
+                          systemIdentity is set.
                         properties:
                           accessKeyIDKey:
                             default: AWS_ACCESS_KEY_ID
@@ -1033,10 +1034,45 @@ spec:
                         description: stsRoleARN is the IAM role LakeKeeper assumes
                           when STS is enabled.
                         type: string
+                      systemIdentity:
+                        description: |-
+                          systemIdentity has LakeKeeper reach AWS with its pod's own identity, such
+                          as EKS Pod Identity or IRSA, instead of static keys. The LakeKeeper pods
+                          run as the "lakekeeper" ServiceAccount in the LakeKeeper namespace, so
+                          associate the IAM role with that account. Trino receives vended
+                          credentials when stsEnabled is true; otherwise Trino uses its own default
+                          AWS credential chain.
+                        properties:
+                          assumeRoleARN:
+                            description: |-
+                              assumeRoleARN is the role LakeKeeper assumes with its pod identity for
+                              its own reads and writes. Empty uses the pod identity directly, which then
+                              needs access to the bucket. When stsEnabled is true, stsRoleARN defaults
+                              to this role.
+                            type: string
+                          externalID:
+                            description: |-
+                              externalID is sent when LakeKeeper assumes assumeRoleARN or stsRoleARN.
+                              Leave empty when the role's trust policy does not require one.
+                            type: string
+                          serviceAccountAnnotations:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              serviceAccountAnnotations are set on the LakeKeeper ServiceAccount, for
+                              example eks.amazonaws.com/role-arn for IRSA. EKS Pod Identity needs none.
+                            type: object
+                        type: object
                     required:
                     - bucket
                     - region
                     type: object
+                    x-kubernetes-validations:
+                    - message: set credentialsSecretRef or systemIdentity, not both
+                      rule: '!(has(self.credentialsSecretRef) && has(self.systemIdentity))'
+                    - message: systemIdentity requires flavor aws
+                      rule: '!has(self.systemIdentity) || !has(self.flavor) || self.flavor
+                        == ''aws'''
                 type: object
               trino:
                 description: trino configures the query engine.

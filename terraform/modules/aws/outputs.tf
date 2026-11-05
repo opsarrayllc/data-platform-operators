@@ -19,38 +19,17 @@ output "sts_role_arn" {
 }
 
 output "warehouse_role_arn" {
-  description = "Warehouse role ARN. Only the LakeKeeper IAM user can assume it."
+  description = "Warehouse role ARN. LakeKeeper's Pod Identity role assumes it, and so does Trino's Pod Identity when sts_enabled is false."
   value       = aws_iam_role.warehouse.arn
 }
 
-output "iam_user_arn" {
-  description = "IAM user whose access key LakeKeeper stores as the warehouse credential."
-  value       = aws_iam_user.lakekeeper.arn
-}
-
-output "access_key_id" {
-  description = "Value for AWS_ACCESS_KEY_ID in the credentials Secret."
-  value       = aws_iam_access_key.lakekeeper.id
-  sensitive   = true
-}
-
-output "secret_access_key" {
-  description = "Value for AWS_SECRET_ACCESS_KEY in the credentials Secret."
-  value       = aws_iam_access_key.lakekeeper.secret
-  sensitive   = true
-}
-
-output "credentials_secret_data" {
-  description = "Kubernetes Secret data. Keys match the operator defaults accessKeyIDKey and secretAccessKeyKey."
-  value = {
-    AWS_ACCESS_KEY_ID     = aws_iam_access_key.lakekeeper.id
-    AWS_SECRET_ACCESS_KEY = aws_iam_access_key.lakekeeper.secret
-  }
-  sensitive = true
+output "lakekeeper_role_arn" {
+  description = "EKS Pod Identity role of the LakeKeeper ServiceAccount."
+  value       = aws_iam_role.lakekeeper.arn
 }
 
 output "datalake_storage" {
-  description = "spec.storage for a DataLake with storage.embedded=false. Create the Secret from credentials_secret_data before applying the DataLake."
+  description = "spec.storage for a DataLake with storage.embedded=false. LakeKeeper uses EKS Pod Identity, so no credentials Secret is needed."
   value = {
     embedded = false
     s3 = merge(
@@ -60,9 +39,8 @@ output "datalake_storage" {
         flavor          = "aws"
         pathStyleAccess = false
         stsEnabled      = var.sts_enabled
-        credentialsSecretRef = {
-          name      = var.credentials_secret_name
-          namespace = var.credentials_secret_namespace
+        systemIdentity = {
+          assumeRoleARN = aws_iam_role.warehouse.arn
         }
       },
       var.sts_enabled ? { stsRoleARN = aws_iam_role.warehouse.arn } : {},
@@ -78,7 +56,7 @@ locals {
     sslMode  = "require"
     credentialsSecretRef = {
       name      = var.postgres_credentials_secret_name
-      namespace = var.credentials_secret_namespace
+      namespace = var.postgres_credentials_secret_namespace
     }
   } : null
 }

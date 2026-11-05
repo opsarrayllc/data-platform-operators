@@ -1,5 +1,5 @@
 variable "name" {
-  description = "Prefix for the IAM user, role, and policy. The user is <name>-lakekeeper and the role is <name>-warehouse."
+  description = "Prefix for the IAM roles and policy. LakeKeeper's Pod Identity role is <name>-lakekeeper and the warehouse role is <name>-warehouse."
   type        = string
   default     = "datalake"
 
@@ -22,6 +22,29 @@ variable "bucket_name" {
 variable "region" {
   description = "Region of the existing VPC and cluster. The AWS provider must be configured for this same region."
   type        = string
+}
+
+variable "eks_cluster_name" {
+  description = "Existing EKS cluster the operator runs on. The module creates EKS Pod Identity associations in it. The cluster must run the eks-pod-identity-agent add-on."
+  type        = string
+}
+
+variable "lakekeeper_namespace" {
+  description = "Namespace of the LakeKeeper ServiceAccount (spec.lakekeeper.namespace). The operator names the account lakekeeper."
+  type        = string
+  default     = "lakekeeper"
+}
+
+variable "trino_namespace" {
+  description = "Namespace of the Trino pods (spec.trino.namespace). Used only when sts_enabled is false, when Trino reaches the bucket with its own Pod Identity."
+  type        = string
+  default     = "trino"
+}
+
+variable "trino_service_account" {
+  description = "ServiceAccount of the Trino pods. Used only when sts_enabled is false."
+  type        = string
+  default     = "default"
 }
 
 variable "vpc_id" {
@@ -51,7 +74,7 @@ variable "vpc_endpoint_bypass_principal_arns" {
 }
 
 variable "sts_enabled" {
-  description = "Create the IAM role LakeKeeper assumes when vending temporary credentials to Trino. The DataLake spec field is storage.s3.stsEnabled."
+  description = "LakeKeeper vends temporary credentials to Trino. When false, Trino gets its own Pod Identity association with the warehouse role instead. The DataLake spec field is storage.s3.stsEnabled."
   type        = bool
   default     = true
 }
@@ -66,18 +89,6 @@ variable "kms_key_arn" {
   description = "Customer-managed KMS key for bucket encryption. Empty uses SSE-S3. When set, the warehouse identities receive decrypt and GenerateDataKey on this key."
   type        = string
   default     = null
-}
-
-variable "credentials_secret_name" {
-  description = "Name of the Kubernetes Secret the DataLake should reference. This module does not create the Secret."
-  type        = string
-  default     = "warehouse-credentials"
-}
-
-variable "credentials_secret_namespace" {
-  description = "Namespace of that Secret. The operator reads it from spec.storage.s3.credentialsSecretRef, which defaults to the LakeKeeper namespace when you copy datalake_storage."
-  type        = string
-  default     = "lakekeeper"
 }
 
 variable "tags" {
@@ -139,7 +150,13 @@ variable "postgres_deletion_protection" {
 }
 
 variable "postgres_credentials_secret_name" {
-  description = "Name of the Kubernetes Secret, in credentials_secret_namespace, that the DataLake and Analytics resources reference for Postgres. This module does not create the Secret."
+  description = "Name of the Kubernetes Secret, in postgres_credentials_secret_namespace, that the DataLake and Analytics resources reference for Postgres. This module does not create the Secret."
   type        = string
   default     = "platform-postgres"
+}
+
+variable "postgres_credentials_secret_namespace" {
+  description = "Namespace of the Postgres credentials Secret."
+  type        = string
+  default     = "lakekeeper"
 }

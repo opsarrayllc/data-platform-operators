@@ -468,6 +468,82 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(string(catalogSecret.Data[nameLakekeeper+".properties"])).NotTo(ContainSubstring("s3.path-style-access=true"))
 	})
 
+	It("uses LakeKeeper's AWS pod identity instead of access keys", func() {
+		resource := &dataplatformv1alpha1.DataLake{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+		Eventually(func() bool {
+			return errors.IsNotFound(k8sClient.Get(ctx, typeNamespacedName, resource))
+		}).Should(BeTrue())
+
+		podIdentity := &dataplatformv1alpha1.DataLake{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			Spec: dataplatformv1alpha1.DataLakeSpec{
+				Storage: dataplatformv1alpha1.StorageSpec{
+					Embedded: ptr.To(false),
+					S3: &dataplatformv1alpha1.S3Spec{
+						Bucket:     "test-bucket",
+						Region:     "us-east-1",
+						STSEnabled: true,
+						SystemIdentity: &dataplatformv1alpha1.S3SystemIdentitySpec{
+							AssumeRoleARN: "arn:aws:iam::123456789012:role/datalake-warehouse",
+							ServiceAccountAnnotations: map[string]string{
+								"example.com/owner": "data",
+							},
+						},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, podIdentity)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("running LakeKeeper as its own annotated ServiceAccount")
+		sa := &corev1.ServiceAccount{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameLakekeeper, Namespace: nameLakekeeper}, sa)).To(Succeed())
+		Expect(sa.Annotations).To(HaveKeyWithValue("example.com/owner", "data"))
+
+		deploy := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameLakekeeper, Namespace: nameLakekeeper}, deploy)).To(Succeed())
+		Expect(deploy.Spec.Template.Spec.ServiceAccountName).To(Equal(nameLakekeeper))
+		env := deploy.Spec.Template.Spec.Containers[0].Env
+		Expect(envValue(env, "LAKEKEEPER__ENABLE_AWS_SYSTEM_CREDENTIALS")).To(Equal("true"))
+		Expect(envValue(env, "LAKEKEEPER__S3_REQUIRE_EXTERNAL_ID_FOR_SYSTEM_CREDENTIALS")).To(Equal("false"))
+		Expect(envValue(env, "LAKEKEEPER__S3_ENABLE_DIRECT_SYSTEM_CREDENTIALS")).To(BeEmpty())
+		Expect(envValue(env, "AWS_REGION")).To(Equal("us-east-1"))
+
+		By("giving Trino vended credentials rather than static keys")
+		catalogSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoCatalog, Namespace: nameTrino}, catalogSecret)).To(Succeed())
+		props := string(catalogSecret.Data[nameLakekeeper+".properties"])
+		Expect(props).To(ContainSubstring("iceberg.rest-catalog.vended-credentials-enabled=true"))
+		Expect(props).NotTo(ContainSubstring("s3.aws-access-key"))
+	})
+
+	It("rejects static keys and a system identity together", func() {
+		both := &dataplatformv1alpha1.DataLake{
+			ObjectMeta: metav1.ObjectMeta{Name: "both-credentials"},
+			Spec: dataplatformv1alpha1.DataLakeSpec{
+				Storage: dataplatformv1alpha1.StorageSpec{
+					Embedded: ptr.To(false),
+					S3: &dataplatformv1alpha1.S3Spec{
+						Bucket: "test-bucket",
+						Region: "us-east-1",
+						CredentialsSecretRef: &dataplatformv1alpha1.S3CredentialsSecretRef{
+							Name: "s3-credentials", Namespace: nameLakekeeper,
+						},
+						SystemIdentity: &dataplatformv1alpha1.S3SystemIdentitySpec{},
+					},
+				},
+			},
+		}
+		err := k8sClient.Create(ctx, both)
+		Expect(err).To(HaveOccurred())
+		Expect(err.Error()).To(ContainSubstring("not both"))
+	})
+
 	It("wires row filters through OpenFGA, OPA, and Trino", func() {
 		resource := &dataplatformv1alpha1.DataLake{}
 		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())

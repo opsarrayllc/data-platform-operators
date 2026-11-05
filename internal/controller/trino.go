@@ -255,7 +255,9 @@ func lakekeeperCatalogProperties(dp *dataplatformv1alpha1.DataLake, store object
 			props["iceberg.rest-catalog.oauth2.scope"] = oidc.scope
 		}
 	}
-	if !store.STSEnabled {
+	// With a system identity and no STS, Trino falls back to its own default
+	// AWS credential chain, such as an EKS Pod Identity association.
+	if !store.STSEnabled && store.SystemIdentity == nil {
 		props["s3.aws-access-key"] = store.AccessKeyID
 		props["s3.aws-secret-key"] = store.SecretAccessKey
 	}

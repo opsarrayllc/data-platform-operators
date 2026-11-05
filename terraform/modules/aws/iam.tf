@@ -1,9 +1,11 @@
-# LakeKeeper stores this user's access key as the warehouse storage credential
-# and uses it for its own object IO and for remote signing. When STS is enabled,
-# LakeKeeper calls sts:AssumeRole on the warehouse role and returns the temporary
+# LakeKeeper authenticates with EKS Pod Identity: the lakekeeper role below is
+# associated with the LakeKeeper ServiceAccount, so no access key exists. That
+# role can only assume the warehouse role. LakeKeeper assumes the warehouse
+# role for its own object IO (storage.s3.systemIdentity.assumeRoleARN) and,
+# when STS is enabled, again with a table-scoped policy to vend temporary
 # credentials to Trino (storage.s3.stsRoleARN, vended-credentials-enabled).
-# Only that user can assume the role. The operator does not use IRSA, so no
-# cluster service account is trusted.
+#
+# The cluster must run the eks-pod-identity-agent add-on.
 
 data "aws_iam_policy_document" "warehouse" {
   statement {
@@ -49,28 +51,74 @@ resource "aws_iam_policy" "warehouse" {
   tags        = var.tags
 }
 
-resource "aws_iam_user" "lakekeeper" {
-  name = "${var.name}-lakekeeper"
-  tags = var.tags
+# EKS Pod Identity requires both actions in the trust policy.
+data "aws_iam_policy_document" "pod_identity_trust" {
+  statement {
+    sid     = "TrustEksPodIdentity"
+    actions = ["sts:AssumeRole", "sts:TagSession"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["pods.eks.amazonaws.com"]
+    }
+  }
 }
 
-resource "aws_iam_user_policy_attachment" "lakekeeper" {
-  user       = aws_iam_user.lakekeeper.name
-  policy_arn = aws_iam_policy.warehouse.arn
+resource "aws_iam_role" "lakekeeper" {
+  name               = "${var.name}-lakekeeper"
+  description        = "EKS Pod Identity role for LakeKeeper. It can only assume ${var.name}-warehouse."
+  assume_role_policy = data.aws_iam_policy_document.pod_identity_trust.json
+  tags               = var.tags
 }
 
-resource "aws_iam_access_key" "lakekeeper" {
-  user = aws_iam_user.lakekeeper.name
+data "aws_iam_policy_document" "assume_warehouse" {
+  statement {
+    sid = "AssumeWarehouseRole"
+    actions = [
+      "sts:AssumeRole",
+      "sts:TagSession",
+    ]
+    resources = [aws_iam_role.warehouse.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "lakekeeper_assume_warehouse" {
+  name   = "${var.name}-assume-warehouse"
+  role   = aws_iam_role.lakekeeper.name
+  policy = data.aws_iam_policy_document.assume_warehouse.json
+}
+
+resource "aws_eks_pod_identity_association" "lakekeeper" {
+  cluster_name    = var.eks_cluster_name
+  namespace       = var.lakekeeper_namespace
+  service_account = "lakekeeper"
+  role_arn        = aws_iam_role.lakekeeper.arn
+  tags            = var.tags
 }
 
 data "aws_iam_policy_document" "warehouse_trust" {
   statement {
-    sid     = "TrustLakekeeperUser"
+    sid     = "TrustLakekeeperRole"
     actions = ["sts:AssumeRole", "sts:TagSession"]
 
     principals {
       type        = "AWS"
-      identifiers = [aws_iam_user.lakekeeper.arn]
+      identifiers = [aws_iam_role.lakekeeper.arn]
+    }
+  }
+
+  # Without STS, Trino gets no vended credentials and reads the bucket through
+  # its own Pod Identity association with this role.
+  dynamic "statement" {
+    for_each = var.sts_enabled ? [] : [1]
+    content {
+      sid     = "TrustEksPodIdentity"
+      actions = ["sts:AssumeRole", "sts:TagSession"]
+
+      principals {
+        type        = "Service"
+        identifiers = ["pods.eks.amazonaws.com"]
+      }
     }
   }
 }
@@ -86,19 +134,12 @@ resource "aws_iam_role_policy_attachment" "warehouse" {
   policy_arn = aws_iam_policy.warehouse.arn
 }
 
-data "aws_iam_policy_document" "assume_warehouse" {
-  statement {
-    sid = "AssumeWarehouseRole"
-    actions = [
-      "sts:AssumeRole",
-      "sts:TagSession",
-    ]
-    resources = [aws_iam_role.warehouse.arn]
-  }
-}
+resource "aws_eks_pod_identity_association" "trino" {
+  count = var.sts_enabled ? 0 : 1
 
-resource "aws_iam_user_policy" "assume_warehouse" {
-  name   = "${var.name}-assume-warehouse"
-  user   = aws_iam_user.lakekeeper.name
-  policy = data.aws_iam_policy_document.assume_warehouse.json
+  cluster_name    = var.eks_cluster_name
+  namespace       = var.trino_namespace
+  service_account = var.trino_service_account
+  role_arn        = aws_iam_role.warehouse.arn
+  tags            = var.tags
 }

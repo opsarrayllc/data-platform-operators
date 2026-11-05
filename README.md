@@ -137,8 +137,7 @@ make build-installer IMG=$IMG   # writes dist/data-platform-operator-install.yam
 
 By default a `DataLake` runs MinIO in the cluster. To keep the warehouse in S3 or GCS instead, use the Terraform modules under [`terraform/`](terraform). Each cloud has a copy-and-paste example that creates the following:
 - the bucket
-- the access identity
-- the credentials Secret
+- the access identity: an EKS Pod Identity role on AWS, an HMAC key in a Secret on GCP
 
 The example then prints the `spec.storage` block to use. Start with [`terraform/README.md`](terraform/README.md).
 
