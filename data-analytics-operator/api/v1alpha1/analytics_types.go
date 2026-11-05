@@ -36,9 +36,10 @@ const (
 	DefaultPostgresImage   = "postgres:17"
 	DefaultPostgresStorage = "10Gi"
 	DefaultRedisImage      = "redis:7.4-alpine"
-	// DefaultImage is the operator-built image with authlib and the Trino
-	// dialect baked in (see images/superset/Dockerfile).
-	DefaultImage = "data-platform-superset:5.0.0"
+	// DefaultImage is the Superset image with authlib and the Trino dialect
+	// baked in (see images/superset/Dockerfile). CI publishes it, and
+	// make kind-up builds and loads the same tag locally.
+	DefaultImage = "ghcr.io/opsarrayllc/data-platform-superset:5.0.0"
 
 	DefaultTrinoHost    = "trino.trino.svc"
 	DefaultTrinoPort    = int32(8080)
@@ -63,8 +64,9 @@ type AnalyticsSpec struct {
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
-	// image is the Superset container image. Defaults to data-platform-superset:5.0.0,
-	// which includes authlib and the Trino dialect.
+	// image is the Superset container image. Defaults to
+	// ghcr.io/opsarrayllc/data-platform-superset:5.0.0, which includes authlib
+	// and the Trino dialect.
 	// +optional
 	Image string `json:"image,omitempty"`
 
@@ -104,19 +106,67 @@ type AnalyticsSpec struct {
 	Auth AuthSpec `json:"auth"`
 }
 
-// PostgresSpec configures Superset's metadata database.
+// PostgresSpec configures Superset's metadata database: either an
+// operator-managed instance or a pointer at an existing server.
 type PostgresSpec struct {
-	// image is the Postgres container image.
+	// embedded deploys a single-replica Postgres in the Superset namespace.
+	// Defaults to true. Set false and fill host/credentials for an external
+	// database. When false, the operator creates the database on that server if
+	// it does not exist, so the credentials need CREATEDB or the database must
+	// already exist.
+	// +optional
+	Embedded *bool `json:"embedded,omitempty"`
+
+	// image is the Postgres container image. It also runs the ensure-database
+	// init container for an external database.
 	// +optional
 	Image string `json:"image,omitempty"`
 
-	// storageSize is the PVC size.
+	// storageSize is the PVC size for embedded Postgres.
 	// +optional
 	StorageSize string `json:"storageSize,omitempty"`
 
 	// database name. Defaults to "superset".
 	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z_][a-z0-9_]{0,62}$`
 	Database string `json:"database,omitempty"`
+
+	// host is required when embedded is false.
+	// +optional
+	Host string `json:"host,omitempty"`
+
+	// port of the external database. Defaults to 5432.
+	// +optional
+	Port int32 `json:"port,omitempty"`
+
+	// sslMode is passed to the Postgres driver (disable, prefer, require, ...).
+	// Defaults to prefer for an external database.
+	// +optional
+	SSLMode string `json:"sslMode,omitempty"`
+
+	// credentialsSecretRef locates username/password for an external database.
+	// +optional
+	CredentialsSecretRef *PostgresCredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+}
+
+// PostgresCredentialsSecretRef locates a Secret with username and password.
+type PostgresCredentialsSecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret. Defaults to the Superset namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// usernameKey is the Secret key for the database user.
+	// +optional
+	// +kubebuilder:default=username
+	UsernameKey string `json:"usernameKey,omitempty"`
+
+	// passwordKey is the Secret key for the database password.
+	// +optional
+	// +kubebuilder:default=password
+	PasswordKey string `json:"passwordKey,omitempty"`
 }
 
 // RedisSpec configures Redis for Superset sessions and cache.

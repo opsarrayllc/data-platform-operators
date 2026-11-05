@@ -1,6 +1,6 @@
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
-SUPERSET_IMG ?= data-platform-superset:5.0.0
+SUPERSET_IMG ?= ghcr.io/opsarrayllc/data-platform-superset:5.0.0
 
 ROOT ?= $(abspath ..)
 CONTROLLER_GEN ?= $(ROOT)/bin/controller-gen

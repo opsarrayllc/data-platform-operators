@@ -55,10 +55,11 @@ const (
 	nameSuperset      = "superset"
 	nameSupersetRedis = "superset-redis"
 
-	secretPostgres     = "postgres"
-	secretSuperset     = "superset"
-	secretSupersetOIDC = "superset-oidc"
-	configMapSuperset  = "superset-config"
+	secretPostgres         = "postgres"
+	secretPostgresExternal = "postgres-external"
+	secretSuperset         = "superset"
+	secretSupersetOIDC     = "superset-oidc"
+	configMapSuperset      = "superset-config"
 
 	keyPostgresUsername         = "username"
 	keyPostgresPassword         = "password"

@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -38,6 +39,60 @@ type postgresConn struct {
 	Username string
 	Password string
 	SSLMode  string
+	// Secret is the Secret in the component namespace that holds the username
+	// and password under keyPostgresUsername and keyPostgresPassword. Pods read
+	// credentials from it rather than from plain env values.
+	Secret string
+	// External is true when the database is not operator-managed.
+	External bool
+}
+
+// credentialsHash changes when the username or password changes, so pod
+// templates can roll when external credentials rotate.
+func (c postgresConn) credentialsHash() string {
+	return hashData(c.Username, c.Password)
+}
+
+// ensureDatabaseScript waits for the server, then creates the target database
+// if it does not exist yet. The database name is restricted by the CRD pattern,
+// so it is safe inside the double-quoted identifier.
+const ensureDatabaseScript = `until pg_isready -q; do sleep 2; done
+if psql -d "$TARGET_DB" -tAc 'SELECT 1' >/dev/null 2>&1; then exit 0; fi
+psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$TARGET_DB\""`
+
+// ensureDatabaseContainer is the init container that creates an external
+// component database before migrations run.
+func ensureDatabaseContainer(image string, conn postgresConn) corev1.Container {
+	env := []corev1.EnvVar{
+		{Name: "PGHOST", Value: conn.Host},
+		{Name: "PGPORT", Value: strconv.Itoa(int(conn.Port))},
+		{Name: "PGCONNECT_TIMEOUT", Value: "5"},
+		{Name: "TARGET_DB", Value: conn.Database},
+		secretEnv("PGUSER", conn.Secret, keyPostgresUsername),
+		secretEnv("PGPASSWORD", conn.Secret, keyPostgresPassword),
+	}
+	if conn.SSLMode != "" {
+		env = append(env, corev1.EnvVar{Name: "PGSSLMODE", Value: conn.SSLMode})
+	}
+	return corev1.Container{
+		Name:            "ensure-database",
+		Image:           image,
+		Command:         []string{"sh", "-c", ensureDatabaseScript},
+		Env:             env,
+		SecurityContext: restrictedContainerSecurity(uidPostgres, gidPostgres),
+	}
+}
+
+func secretEnv(name, secret, key string) corev1.EnvVar {
+	return corev1.EnvVar{
+		Name: name,
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: secret},
+				Key:                  key,
+			},
+		},
+	}
 }
 
 func (r *DataLakeReconciler) reconcilePostgres(
@@ -48,7 +103,19 @@ func (r *DataLakeReconciler) reconcilePostgres(
 	spec := dp.Spec.Lakekeeper.Postgres
 
 	if !spec.IsEmbedded() {
-		return r.externalPostgres(ctx, dp, spec)
+		conn, err := r.externalPostgres(ctx, dp, externalPostgresRequest{
+			spec:      spec,
+			field:     "lakekeeper.postgres",
+			condition: dataplatformv1alpha1.ConditionPostgresReady,
+			namespace: ns,
+			component: componentPostgres,
+			database:  spec.DatabaseOrDefault(),
+		})
+		if err != nil {
+			return postgresConn{}, err
+		}
+		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionTrue, reasonReady, "Using external Postgres")
+		return conn, nil
 	}
 
 	if err := r.ensurePostgresSecret(ctx, dp, ns); err != nil {
@@ -77,6 +144,7 @@ func (r *DataLakeReconciler) reconcilePostgres(
 		Database: spec.DatabaseOrDefault(),
 		Username: namePostgres,
 		SSLMode:  sslModeDisable,
+		Secret:   secretPostgres,
 	}
 	if !ready {
 		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonNotReady, "Postgres StatefulSet is not ready")
@@ -86,45 +154,84 @@ func (r *DataLakeReconciler) reconcilePostgres(
 	return conn, nil
 }
 
+// externalPostgresRequest describes one component's external database.
+type externalPostgresRequest struct {
+	spec dataplatformv1alpha1.PostgresSpec
+	// field is the spec path used in error messages, such as "lakekeeper.postgres".
+	field string
+	// condition is set to False when the spec or credentials are unusable.
+	condition string
+	// namespace is the component namespace. The credentials Secret defaults to
+	// it, and the operator-owned copy is written there.
+	namespace string
+	component string
+	database  string
+}
+
+// externalPostgres reads the credentials for an external database and copies
+// them into an operator-owned Secret in the component namespace, so pods can
+// reference them without the password appearing in a pod spec.
 func (r *DataLakeReconciler) externalPostgres(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataLake,
-	spec dataplatformv1alpha1.PostgresSpec,
+	req externalPostgresRequest,
 ) (postgresConn, error) {
-	if spec.Host == "" {
-		err := fmt.Errorf("lakekeeper.postgres.host is required when embedded is false")
-		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonMissing, err.Error())
+	fail := func(reason string, err error) (postgresConn, error) {
+		setCondition(dp, req.condition, metav1.ConditionFalse, reason, err.Error())
 		return postgresConn{}, err
 	}
+	spec := req.spec
+	if spec.Host == "" {
+		return fail(reasonMissing, fmt.Errorf("%s.host is required when embedded is false", req.field))
+	}
 	if spec.CredentialsSecretRef == nil || spec.CredentialsSecretRef.Name == "" {
-		err := fmt.Errorf("lakekeeper.postgres.credentialsSecretRef is required when embedded is false")
-		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonMissing, err.Error())
-		return postgresConn{}, err
+		return fail(reasonMissing, fmt.Errorf("%s.credentialsSecretRef is required when embedded is false", req.field))
 	}
 	ref := spec.CredentialsSecretRef
 	secretNS := ref.Namespace
 	if secretNS == "" {
-		secretNS = dp.Spec.Lakekeeper.NamespaceOrDefault()
+		secretNS = req.namespace
 	}
 	user, err := r.getSecretData(ctx, ref.Name, secretNS, ref.UsernameKeyOrDefault())
 	if err != nil {
-		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
-		return postgresConn{}, err
+		return fail(reasonError, err)
 	}
 	pass, err := r.getSecretData(ctx, ref.Name, secretNS, ref.PasswordKeyOrDefault())
 	if err != nil {
-		setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
-		return postgresConn{}, err
+		return fail(reasonError, err)
 	}
-	setCondition(dp, dataplatformv1alpha1.ConditionPostgresReady, metav1.ConditionTrue, reasonReady, "Using external Postgres")
+	if err := r.ensureExternalPostgresSecret(ctx, dp, req.namespace, req.component, user, pass); err != nil {
+		return fail(reasonError, err)
+	}
 	return postgresConn{
 		Host:     spec.Host,
 		Port:     spec.PortOrDefault(),
-		Database: spec.DatabaseOrDefault(),
+		Database: req.database,
 		Username: user,
 		Password: pass,
 		SSLMode:  spec.SSLMode,
+		Secret:   secretPostgresExternal,
+		External: true,
 	}, nil
+}
+
+// ensureExternalPostgresSecret keeps the operator-owned copy of external
+// credentials current, so a rotated password reaches the pods.
+func (r *DataLakeReconciler) ensureExternalPostgresSecret(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataLake,
+	ns, component, user, pass string,
+) error {
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretPostgresExternal, Namespace: ns}}
+	return r.apply(ctx, dp, secret, func() error {
+		ensureLabels(secret, labelsFor(dp, component))
+		secret.Type = corev1.SecretTypeOpaque
+		secret.Data = map[string][]byte{
+			keyPostgresUsername: []byte(user),
+			keyPostgresPassword: []byte(pass),
+		}
+		return nil
+	})
 }
 
 func (r *DataLakeReconciler) ensurePostgresSecret(

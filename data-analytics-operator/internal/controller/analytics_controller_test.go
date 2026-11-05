@@ -24,6 +24,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
@@ -122,6 +123,10 @@ var _ = Describe("Analytics Controller", func() {
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`"api_base_url": "http://keycloak.keycloak.svc:8080/realms/dataplatform/protocol/"`))
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("DB_CONNECTION_MUTATOR"))
 		Expect(supersetCM.Data[supersetConfigKey]).NotTo(ContainSubstring("server_metadata_url"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`quote_plus(os.environ["DB_PASS"])`))
+		pgSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretPostgres, Namespace: nameSuperset}, pgSecret)).To(Succeed())
+		Expect(supersetCM.Data[supersetConfigKey]).NotTo(ContainSubstring(string(pgSecret.Data[keyPostgresPassword])))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("database_name=name"))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("impersonate_user = True"))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("trino://trino.trino.svc:8080/lakekeeper"))
@@ -132,4 +137,87 @@ var _ = Describe("Analytics Controller", func() {
 		Expect(k8sClient.Get(ctx, key, updated)).To(Succeed())
 		Expect(updated.Status.SupersetEndpoint).To(Equal("http://superset.superset.svc:8088"))
 	})
+
+	It("uses an external Postgres without a password in the pod spec or ConfigMap", func() {
+		const password = "s3cret-password"
+		ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "lakekeeper"}}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: ns.Name}, ns); errors.IsNotFound(err) {
+			Expect(k8sClient.Create(ctx, ns)).To(Succeed())
+		}
+		source := &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "platform-postgres", Namespace: "lakekeeper"},
+			Data: map[string][]byte{
+				keyPostgresUsername: []byte("platform"),
+				keyPostgresPassword: []byte(password),
+			},
+		}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: source.Name, Namespace: source.Namespace}, &corev1.Secret{}); errors.IsNotFound(err) {
+			Expect(k8sClient.Create(ctx, source)).To(Succeed())
+		}
+
+		a := &analyticsv1alpha1.Analytics{}
+		Expect(k8sClient.Get(ctx, key, a)).To(Succeed())
+		a.Spec.Postgres = analyticsv1alpha1.PostgresSpec{
+			Embedded: ptr.To(false),
+			Host:     "pg.example.com",
+			SSLMode:  "require",
+			CredentialsSecretRef: &analyticsv1alpha1.PostgresCredentialsSecretRef{
+				Name:      "platform-postgres",
+				Namespace: "lakekeeper",
+			},
+		}
+		Expect(k8sClient.Update(ctx, a)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: key})
+		Expect(err).NotTo(HaveOccurred())
+
+		copied := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretPostgresExternal, Namespace: nameSuperset}, copied)).To(Succeed())
+		Expect(string(copied.Data[keyPostgresPassword])).To(Equal(password))
+
+		deploy := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameSuperset, Namespace: nameSuperset}, deploy)).To(Succeed())
+		pod := deploy.Spec.Template.Spec
+		Expect(pod.InitContainers).To(HaveLen(1))
+		Expect(pod.InitContainers[0].Name).To(Equal("ensure-database"))
+		env := pod.Containers[0].Env
+		Expect(envValue(env, "DB_HOST")).To(Equal("pg.example.com"))
+		Expect(envValue(env, "DB_NAME")).To(Equal("superset"))
+		Expect(envValue(env, "DB_SSLMODE")).To(Equal("require"))
+		Expect(envSecretName(env, "DB_PASS")).To(Equal(secretPostgresExternal))
+		for _, c := range append(pod.InitContainers, pod.Containers...) {
+			for _, e := range c.Env {
+				Expect(e.Value).NotTo(ContainSubstring(password), "container %s env %s", c.Name, e.Name)
+			}
+		}
+
+		cm := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapSuperset, Namespace: nameSuperset}, cm)).To(Succeed())
+		Expect(cm.Data[supersetConfigKey]).NotTo(ContainSubstring(password))
+
+		updated := &analyticsv1alpha1.Analytics{}
+		Expect(k8sClient.Get(ctx, key, updated)).To(Succeed())
+		cond := meta.FindStatusCondition(updated.Status.Conditions, analyticsv1alpha1.ConditionPostgresReady)
+		Expect(cond).NotTo(BeNil())
+		Expect(cond.Status).To(Equal(metav1.ConditionTrue))
+		Expect(cond.Message).To(Equal("Using external Postgres"))
+	})
 })
+
+func envValue(env []corev1.EnvVar, name string) string {
+	for _, e := range env {
+		if e.Name == name {
+			return e.Value
+		}
+	}
+	return ""
+}
+
+func envSecretName(env []corev1.EnvVar, name string) string {
+	for _, e := range env {
+		if e.Name == name && e.ValueFrom != nil && e.ValueFrom.SecretKeyRef != nil {
+			return e.ValueFrom.SecretKeyRef.Name
+		}
+	}
+	return ""
+}

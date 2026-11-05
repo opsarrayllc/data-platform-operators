@@ -343,7 +343,9 @@ spec:
                           translates Trino checks to LakeKeeper.
                         type: string
                       postgres:
-                        description: postgres is OpenFGA's metadata database.
+                        description: |-
+                          postgres is OpenFGA's datastore. Set embedded to false to use an external
+                          server, such as the RDS instance the AWS Terraform module can create.
                         properties:
                           credentialsSecretRef:
                             description: credentialsSecretRef locates username/password
@@ -354,7 +356,7 @@ spec:
                                 type: string
                               namespace:
                                 description: namespace of the Secret. Defaults to
-                                  the LakeKeeper namespace.
+                                  the component's namespace.
                                 type: string
                               passwordKey:
                                 default: password
@@ -370,12 +372,17 @@ spec:
                             - name
                             type: object
                           database:
-                            description: database name.
+                            description: |-
+                              database name. Defaults to "postgres" for LakeKeeper. For an external OpenFGA
+                              database it defaults to "openfga", so the two can share one server.
+                            pattern: ^[a-z_][a-z0-9_]{0,62}$
                             type: string
                           embedded:
                             description: |-
-                              embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+                              embedded deploys a single-replica Postgres in the component's namespace.
                               Defaults to true. Set false and fill host/credentials for an external database.
+                              When false, the operator creates the database on that server if it does not exist,
+                              so the credentials need CREATEDB or the database must already exist.
                             type: boolean
                           host:
                             description: host is required when embedded is false.
@@ -725,7 +732,7 @@ spec:
                             type: string
                           namespace:
                             description: namespace of the Secret. Defaults to the
-                              LakeKeeper namespace.
+                              component's namespace.
                             type: string
                           passwordKey:
                             default: password
@@ -741,12 +748,17 @@ spec:
                         - name
                         type: object
                       database:
-                        description: database name.
+                        description: |-
+                          database name. Defaults to "postgres" for LakeKeeper. For an external OpenFGA
+                          database it defaults to "openfga", so the two can share one server.
+                        pattern: ^[a-z_][a-z0-9_]{0,62}$
                         type: string
                       embedded:
                         description: |-
-                          embedded deploys a single-replica Postgres in the LakeKeeper namespace.
+                          embedded deploys a single-replica Postgres in the component's namespace.
                           Defaults to true. Set false and fill host/credentials for an external database.
+                          When false, the operator creates the database on that server if it does not exist,
+                          so the credentials need CREATEDB or the database must already exist.
                         type: boolean
                       host:
                         description: host is required when embedded is false.

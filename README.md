@@ -58,19 +58,25 @@ make install
 kubectl apply -k config/samples/
 ```
 
-## Container image
+## Container images
 
-CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to GitHub Packages:
+CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to GitHub Packages. Each operator image has the same name as its Helm chart:
 
-```
-ghcr.io/opsarrayllc/data-platform-operator
-```
+| Image | Built from |
+| --- | --- |
+| `ghcr.io/opsarrayllc/data-lake-operator` | repo root |
+| `ghcr.io/opsarrayllc/data-analytics-operator` | `data-analytics-operator/` |
+| `ghcr.io/opsarrayllc/data-orchestration-operator` | `data-orchestration-operator/` |
+| `ghcr.io/opsarrayllc/data-platform-superset` | `data-analytics-operator/images/superset/` |
 
-Tags are derived from the triggering ref: `latest` and `main` from the default
-branch, `sha-<commit>` for every build, and semver tags (`1.2.3`, `1.2`, `1`)
-when you push a `v*` tag. Pull requests are built as a check but never pushed.
+The operator image tags come from the ref that triggered the build:
+- `latest` and `main` from the default branch
+- `sha-<commit>` for every build
+- semver tags (`1.2.3`, `1.2`, `1`) when you push a `v*` tag
 
-To cut a release:
+The Superset image is tagged with its Superset version (`5.0.0`), which is the tag the analytics operator uses by default. Pull requests are built as a check but never pushed.
+
+To cut a release of the operator images and charts:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
@@ -78,54 +84,53 @@ git tag v0.1.0 && git push origin v0.1.0
 
 ## Installing with Helm
 
-The chart is published to GitHub Packages as an OCI artifact and installs the
-CRD, RBAC, and controller together:
+Each operator has a chart, published to GitHub Packages as an OCI artifact under `charts/`. A chart installs its CRD, RBAC, and controller together:
 
 ```bash
-helm install data-platform-operator \
-  oci://ghcr.io/opsarrayllc/charts/data-platform-operator \
-  --version 0.1.0 \
-  --namespace data-platform-system --create-namespace
+for chart in data-lake-operator data-analytics-operator data-orchestration-operator; do
+  helm install "${chart}" "oci://ghcr.io/opsarrayllc/charts/${chart}" \
+    --version 0.1.0 \
+    --namespace data-platform-system --create-namespace
+done
 ```
 
-The chart version and the operator image tag are released together, so the
-default `image.tag` follows the chart's `appVersion` and you rarely need to set
-it. Chart source lives in `deploy/data-lake-operator`; see its `values.yaml` for
-the full set of options. Notable ones:
+Install only the charts you need. Analytics and Orchestration expect a `DataLake` to sign users in through and to query.
+
+A chart's version and its operator image tag are released together. The default `image.tag` follows the chart's `appVersion`, so you rarely need to set it. Chart sources live in `deploy/<chart>`; see each `values.yaml` for the full set of options. Notable ones:
 
 | Value | Default | Purpose |
 | --- | --- | --- |
-| `crds.enabled` | `true` | Install the `DataLake` CRD with the release |
-| `crds.keep` | `true` | Keep the CRD (and all `DataLake`s) on uninstall |
+| `crds.enabled` | `true` | Install the chart's CRD with the release |
+| `crds.keep` | `true` | Keep the CRD, and every resource of that kind, on uninstall |
 | `metrics.secure` | `true` | Serve metrics over HTTPS with authn/authz |
 | `metrics.serviceMonitor.enabled` | `false` | Create a Prometheus `ServiceMonitor` |
 | `replicaCount` | `1` | Extra replicas are standbys; leader election picks one |
 
-The CRD template is generated from `config/crd/bases`, so after changing the API
-run `make helm-crds` and commit the result. CI fails the release if the chart's
-copy is stale.
+The CRD and RBAC templates are generated from each operator's `config/`. After changing an API or RBAC markers, run `make helm-sync`, which syncs all three charts, and commit the result. CI fails the release if a chart's copy is stale.
 
-## Deploying with kustomize
+## Deploying the data lake operator with kustomize
 
 ```bash
-export IMG=ghcr.io/opsarrayllc/data-platform-operator:latest
+export IMG=ghcr.io/opsarrayllc/data-lake-operator:latest
 make deploy IMG=$IMG
 ```
 
 To build and push the image yourself instead of relying on CI:
 
 ```bash
-export IMG=<registry>/data-platform-operator:<tag>
+export IMG=<registry>/data-lake-operator:<tag>
 make docker-build docker-push IMG=$IMG   # single-arch, your host platform
 make docker-buildx IMG=$IMG              # multi-arch
 ```
+
+The analytics and orchestration operators have no kustomize deployment; install them with Helm. To build their images yourself, run `make -C data-analytics-operator docker-build IMG=...` or the same in `data-orchestration-operator`.
 
 Tear down with `make undeploy` and `make uninstall`.
 
 To produce a single self-contained manifest for distribution:
 
 ```bash
-make build-installer IMG=$IMG   # writes dist/install.yaml
+make build-installer IMG=$IMG   # writes dist/data-platform-operator-install.yaml
 ```
 
 ## Cloud object storage
@@ -264,11 +269,11 @@ That brings up Keycloak, LakeKeeper, Trino, Superset, and Argo behind mkcert TLS
 with Keycloak (`admin` / password from `keycloak/keycloak-admin`). To query Trino
 from DBeaver-CE, see [docs/dbeaver.md](docs/dbeaver.md).
 
-Superset uses `data-platform-superset:5.0.0`, built from
+Superset uses `ghcr.io/opsarrayllc/data-platform-superset:5.0.0`, built from
 [`data-analytics-operator/images/superset/Dockerfile`](data-analytics-operator/images/superset/Dockerfile)
-(stock Apache Superset plus `authlib` and the Trino dialect). `make kind-up` builds
-and loads it; for other clusters run `make docker-build-superset SUPERSET_IMG=...`
-and set `spec.image` on the Analytics resource.
+(stock Apache Superset plus `authlib` and the Trino dialect). CI publishes it, and
+`make kind-up` builds and loads the same tag into kind. To use your own build, run
+`make docker-build-superset SUPERSET_IMG=...` and set `spec.image` on the Analytics resource.
 
 ## Notes
 

@@ -257,8 +257,9 @@ spec:
                 type: array
               image:
                 description: |-
-                  image is the Superset container image. Defaults to data-platform-superset:5.0.0,
-                  which includes authlib and the Trino dialect.
+                  image is the Superset container image. Defaults to
+                  ghcr.io/opsarrayllc/data-platform-superset:5.0.0, which includes authlib
+                  and the Trino dialect.
                 type: string
               namespace:
                 description: |-
@@ -268,14 +269,61 @@ spec:
               postgres:
                 description: postgres is Superset's metadata database.
                 properties:
+                  credentialsSecretRef:
+                    description: credentialsSecretRef locates username/password for
+                      an external database.
+                    properties:
+                      name:
+                        description: name of the Secret.
+                        type: string
+                      namespace:
+                        description: namespace of the Secret. Defaults to the Superset
+                          namespace.
+                        type: string
+                      passwordKey:
+                        default: password
+                        description: passwordKey is the Secret key for the database
+                          password.
+                        type: string
+                      usernameKey:
+                        default: username
+                        description: usernameKey is the Secret key for the database
+                          user.
+                        type: string
+                    required:
+                    - name
+                    type: object
                   database:
                     description: database name. Defaults to "superset".
+                    pattern: ^[a-z_][a-z0-9_]{0,62}$
+                    type: string
+                  embedded:
+                    description: |-
+                      embedded deploys a single-replica Postgres in the Superset namespace.
+                      Defaults to true. Set false and fill host/credentials for an external
+                      database. When false, the operator creates the database on that server if
+                      it does not exist, so the credentials need CREATEDB or the database must
+                      already exist.
+                    type: boolean
+                  host:
+                    description: host is required when embedded is false.
                     type: string
                   image:
-                    description: image is the Postgres container image.
+                    description: |-
+                      image is the Postgres container image. It also runs the ensure-database
+                      init container for an external database.
+                    type: string
+                  port:
+                    description: port of the external database. Defaults to 5432.
+                    format: int32
+                    type: integer
+                  sslMode:
+                    description: |-
+                      sslMode is passed to the Postgres driver (disable, prefer, require, ...).
+                      Defaults to prefer for an external database.
                     type: string
                   storageSize:
-                    description: storageSize is the PVC size.
+                    description: storageSize is the PVC size for embedded Postgres.
                     type: string
                 type: object
               publicURL:

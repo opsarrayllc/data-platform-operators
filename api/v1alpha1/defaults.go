@@ -91,6 +91,11 @@ func (s *PostgresSpec) DatabaseOrDefault() string {
 	return stringOrDefault(s.Database, "postgres")
 }
 
+// DatabaseOr returns the Postgres database name, or def when it is unset.
+func (s *PostgresSpec) DatabaseOr(def string) string {
+	return stringOrDefault(s.Database, def)
+}
+
 // NameOrDefault returns the warehouse name.
 func (s *WarehouseSpec) NameOrDefault() string {
 	return stringOrDefault(s.Name, DefaultWarehouseName)
