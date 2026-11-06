@@ -129,7 +129,8 @@ func roleMemberDiff(current []string, wanted []CatalogPrincipal, prunePrefix str
 }
 
 // roleAssigneeUsers parses GET /management/v1/permissions/role/{id}/assignments
-// and returns the user ids assigned directly. Role assignees are skipped.
+// and returns the user ids assigned directly. Role assignees and other
+// relations, such as ownership, are skipped.
 func roleAssigneeUsers(body []byte) ([]string, error) {
 	var resp struct {
 		Assignments []struct {
@@ -323,8 +324,11 @@ func (c *proxyCatalogClient) EnsureAccessRoles(
 			return err
 		}
 		assignmentsPath := "management/v1/permissions/role/" + roleID + "/assignments"
+		// No relations filter: LakeKeeper parses ?relations= only as a sequence
+		// and rejects a single value with 400. All relations come back, and
+		// roleAssigneeUsers keeps only assignees.
 		status, body, err := c.do(ctx, http.MethodGet, namespace, service, port,
-			assignmentsPath+"?relations=assignee", bearer, nil)
+			assignmentsPath, bearer, nil)
 		if err != nil {
 			return err
 		}
