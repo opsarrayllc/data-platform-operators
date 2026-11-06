@@ -250,6 +250,12 @@ func lakekeeperEnv(dp *dataplatformv1alpha1.DataLake, conn postgresConn, oidc oi
 			corev1.EnvVar{Name: "LAKEKEEPER__UI__OPENID_CLIENT_ID", Value: oidc.uiClientID},
 			corev1.EnvVar{Name: "LAKEKEEPER__UI__OPENID_SCOPE", Value: lakekeeperUIScope(oidc.scope)},
 		)
+		if oidc.uiTokenType != "" {
+			env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__UI__OPENID_TOKEN_TYPE", Value: oidc.uiTokenType})
+		}
+		if oidc.subjectClaim != "" {
+			env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__OPENID_SUBJECT_CLAIM", Value: oidc.subjectClaim})
+		}
 		if oidc.publicIssuer != "" && oidc.publicIssuer != oidc.issuer {
 			env = append(env,
 				corev1.EnvVar{Name: "LAKEKEEPER__OPENID_ADDITIONAL_ISSUERS", Value: oidc.publicIssuer},

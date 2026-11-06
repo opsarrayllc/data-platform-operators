@@ -18,6 +18,7 @@ package controller
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -34,8 +35,8 @@ import (
 
 const (
 	requeueWhileProgressing = 15 * time.Second
-	// requeueAccessSync picks up users added to Keycloak groups after the
-	// platform first became ready.
+	// requeueAccessSync picks up group membership changes in Keycloak or the
+	// external directory after the platform first became ready.
 	requeueAccessSync = time.Minute
 )
 
@@ -44,6 +45,18 @@ type DataLakeReconciler struct {
 	client.Client
 	Scheme  *runtime.Scheme
 	Catalog CatalogClient
+	// HTTPClient calls external directories such as JumpCloud. Nil uses a
+	// client with a 30s timeout.
+	HTTPClient *http.Client
+}
+
+// syncsAccessGroups reports whether LakeKeeper role membership is synced from
+// a directory: embedded Keycloak, or spec.auth.groupSync for external issuers.
+func syncsAccessGroups(dp *dataplatformv1alpha1.DataLake) bool {
+	if !dp.Spec.Auth.IsEnabled() {
+		return false
+	}
+	return dp.Spec.Auth.IsEmbedded() || dp.Spec.Auth.JumpCloudSync() != nil
 }
 
 // +kubebuilder:rbac:groups=dataplatform.opsarray.io,resources=datalakes,verbs=get;list;watch;create;update;patch;delete
@@ -107,7 +120,7 @@ func (r *DataLakeReconciler) reconcile(ctx context.Context, dp *dataplatformv1al
 	}
 
 	setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionTrue, reasonReady, "All enabled components are ready")
-	if dp.Spec.Auth.IsEnabled() && dp.Spec.Auth.IsEmbedded() {
+	if syncsAccessGroups(dp) {
 		return ctrl.Result{RequeueAfter: requeueAccessSync}, nil
 	}
 	return ctrl.Result{}, nil

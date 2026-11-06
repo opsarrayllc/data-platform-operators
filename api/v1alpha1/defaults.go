@@ -359,3 +359,31 @@ func (s *PostgresCredentialsSecretRef) UsernameKeyOrDefault() string {
 func (s *PostgresCredentialsSecretRef) PasswordKeyOrDefault() string {
 	return stringOrDefault(s.PasswordKey, "password")
 }
+
+// JumpCloudSync returns the JumpCloud group sync settings, or nil.
+func (s *AuthSpec) JumpCloudSync() *JumpCloudGroupSyncSpec {
+	if s.GroupSync == nil {
+		return nil
+	}
+	return s.GroupSync.JumpCloud
+}
+
+// APIURLOrDefault returns the JumpCloud API base URL without a trailing slash.
+func (s *JumpCloudGroupSyncSpec) APIURLOrDefault() string {
+	return strings.TrimRight(stringOrDefault(s.APIURL, "https://console.jumpcloud.com"), "/")
+}
+
+// SubjectAttributeOrDefault returns the JumpCloud user attribute used as the LakeKeeper subject.
+func (s *JumpCloudGroupSyncSpec) SubjectAttributeOrDefault() string {
+	return stringOrDefault(s.SubjectAttribute, "id")
+}
+
+// GroupNameFor returns the JumpCloud user group that fills a LakeKeeper role.
+func (s *JumpCloudGroupSyncSpec) GroupNameFor(role string) string {
+	return stringOrDefault(s.GroupNames[role], role)
+}
+
+// KeyOrDefault returns the Secret key for the JumpCloud API key.
+func (s *JumpCloudAPIKeySecretRef) KeyOrDefault() string {
+	return stringOrDefault(s.Key, "apiKey")
+}

@@ -67,11 +67,21 @@ func (r *DataLakeReconciler) reconcileAccessGroups(
 	oidc oidcConfig,
 	fga openfgaConfig,
 ) error {
-	if !oidc.enabled || !dp.Spec.Auth.IsEmbedded() {
+	if !oidc.enabled || !syncsAccessGroups(dp) {
 		return nil
 	}
 	log := logf.FromContext(ctx)
-	members, err := r.accessGroupMembers(ctx, dp)
+	var members map[string][]CatalogPrincipal
+	var err error
+	if sync := dp.Spec.Auth.JumpCloudSync(); sync != nil && !dp.Spec.Auth.IsEmbedded() {
+		names := make([]string, 0, len(defaultAccessGroups()))
+		for _, group := range defaultAccessGroups() {
+			names = append(names, group.Name)
+		}
+		members, err = r.jumpCloudGroupMembers(ctx, sync, names)
+	} else {
+		members, err = r.accessGroupMembers(ctx, dp)
+	}
 	if err != nil {
 		return err
 	}
@@ -86,6 +96,9 @@ func (r *DataLakeReconciler) reconcileAccessGroups(
 			ProjectRelations:   group.ProjectRelations,
 			WarehouseRelations: group.WarehouseRelations,
 			Members:            members[group.Name],
+			// Membership mirrors the directory. Only people (oidc~) are pruned;
+			// ServiceAccounts and nested roles are never touched.
+			PruneMemberPrefix: oidcSubjectPrefix,
 		})
 		for _, member := range members[group.Name] {
 			tuples = append(tuples, AuthzTuple{
@@ -223,7 +236,7 @@ func (r *DataLakeReconciler) keycloakGroupMembers(
 			Subject: oidcSubjectPrefix + member.ID,
 			Name:    name,
 			Email:   member.Email,
-			Type:    "human",
+			Type:    catalogUserTypeHuman,
 		})
 	}
 	return principals, nil
