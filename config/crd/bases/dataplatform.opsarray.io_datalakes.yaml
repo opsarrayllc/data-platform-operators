@@ -216,22 +216,53 @@ spec:
                         type: object
                       issuer:
                         description: |-
-                          issuer is the OIDC issuer URL (no trailing slash).
+                          issuer is the OIDC issuer URL, exactly as the provider's discovery
+                          document and tokens state it, including any trailing slash.
                           Example (Okta): https://example.okta.com/oauth2/default
-                          Example (JumpCloud / Keycloak): https://idp.example.com/realms/company
+                          Example (JumpCloud): https://oauth.id.jumpcloud.com/
+                          Example (Keycloak): https://idp.example.com/realms/company
                         minLength: 1
                         type: string
                       scope:
-                        description: scope is requested during the client-credentials
-                          grant. Defaults to "lakekeeper".
+                        description: |-
+                          scope is requested during the client-credentials grant and by the
+                          LakeKeeper UI, which adds "openid". Defaults to "lakekeeper". Set it to
+                          "openid" for providers without custom scopes, such as JumpCloud.
                         type: string
                       tokenEndpoint:
                         description: |-
-                          tokenEndpoint is the OAuth2 token URL. Defaults to issuer + "/protocol/openid-connect/token"
-                          (Keycloak / JumpCloud). Okta typically needs "/v1/token" on the authorization server.
+                          tokenEndpoint is the OAuth2 token URL for the client-credentials grant.
+                          Defaults to issuer + "/protocol/openid-connect/token" (Keycloak). Okta
+                          typically needs "/v1/token" on the authorization server. Unused with
+                          auth.serviceAccountTokens.
                         type: string
                     required:
                     - issuer
+                    type: object
+                  serviceAccountTokens:
+                    description: |-
+                      serviceAccountTokens makes the operator, Trino's Iceberg catalog, and the
+                      OPA bridge authenticate to LakeKeeper with Kubernetes ServiceAccount
+                      tokens instead of OIDC client credentials. Use it with identity providers
+                      that have no client-credentials grant, such as JumpCloud. People still
+                      sign in through the OIDC provider.
+
+                      LakeKeeper validates the tokens with the TokenReview API, so the operator
+                      binds the lakekeeper ServiceAccount to system:auth-delegator. Trino and
+                      OPA run a small sidecar that serves their projected token on a localhost
+                      token endpoint, so the kubelet's token rotation reaches them without a
+                      restart.
+                    properties:
+                      audience:
+                        description: |-
+                          audience is requested in every token and is the only audience LakeKeeper
+                          accepts for Kubernetes tokens. Defaults to "lakekeeper".
+                        type: string
+                      proxyImage:
+                        description: |-
+                          proxyImage serves the projected token on 127.0.0.1 next to Trino and
+                          OPA. It must provide busybox httpd with CGI support.
+                        type: string
                     type: object
                 type: object
               authz:

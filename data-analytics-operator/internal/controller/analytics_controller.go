@@ -19,7 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
-	"strings"
+	"net/http"
 	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -39,6 +39,9 @@ const requeueWhileProgressing = 15 * time.Second
 type AnalyticsReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	// HTTPClient fetches OIDC discovery documents. Nil uses a client with a
+	// 10 second timeout.
+	HTTPClient *http.Client
 }
 
 // +kubebuilder:rbac:groups=dataplatform.opsarray.io,resources=analytics,verbs=get;list;watch;create;update;patch;delete
@@ -108,10 +111,18 @@ func (r *AnalyticsReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 type oidcConfig struct {
-	enabled          bool
-	issuer           string
-	publicIssuer     string
+	enabled      bool
+	issuer       string
+	publicIssuer string
+	// keycloak keeps the Keycloak-specific Superset provider, which reads
+	// groups from Keycloak's userinfo path. Other issuers use a generic OIDC
+	// provider with claims from the ID token and userinfo.
+	keycloak         bool
+	authURL          string
 	tokenURL         string
+	jwksURL          string
+	userinfoURL      string
+	groupsClaim      string
 	supersetClientID string
 	supersetSecret   string
 	trinoClientID    string
@@ -148,19 +159,28 @@ func (r *AnalyticsReconciler) resolveOIDC(ctx context.Context, a *analyticsv1alp
 		return oidcConfig{}, err
 	}
 
-	issuer := strings.TrimRight(spec.Issuer, "/")
-	publicIssuer := strings.TrimRight(spec.PublicIssuer, "/")
+	issuer := spec.Issuer
+	publicIssuer := spec.PublicIssuer
 	if publicIssuer == "" {
 		publicIssuer = issuer
 	}
-	return oidcConfig{
+	cfg := oidcConfig{
 		enabled:          true,
 		issuer:           issuer,
 		publicIssuer:     publicIssuer,
-		tokenURL:         issuer + "/protocol/openid-connect/token",
+		keycloak:         isKeycloakIssuer(issuer),
+		authURL:          spec.AuthorizationEndpoint,
+		tokenURL:         spec.TokenEndpoint,
+		jwksURL:          spec.JWKSURI,
+		userinfoURL:      spec.UserinfoEndpoint,
+		groupsClaim:      spec.GroupsClaimOrDefault(),
 		supersetClientID: supersetID,
 		supersetSecret:   supersetSecret,
 		trinoClientID:    trinoID,
 		trinoSecret:      trinoSecret,
-	}, nil
+	}
+	if err := r.resolveOIDCEndpoints(ctx, &cfg); err != nil {
+		return oidcConfig{}, err
+	}
+	return cfg, nil
 }

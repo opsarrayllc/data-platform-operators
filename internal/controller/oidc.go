@@ -46,13 +46,16 @@ type oidcConfig struct {
 	adminSubject string
 	adminName    string
 	adminEmail   string
-	// opaSubject is the OIDC subject of the OPA bridge's service account, which
-	// needs its own grant to inspect other users' permissions.
-	opaSubject string
-	// trinoSubject is the OIDC subject of Trino's confidential client. The
-	// Iceberg REST connector authenticates as this principal, so it needs
-	// project access to resolve warehouses.
-	trinoSubject   string
+	// opaPrincipal is the LakeKeeper user id of the OPA bridge, which needs
+	// its own grant to inspect other users' permissions.
+	opaPrincipal string
+	// trinoPrincipal is the LakeKeeper user id of Trino's Iceberg REST
+	// connector, which needs project access to resolve warehouses.
+	trinoPrincipal string
+	// serviceAccounts replaces the machine OIDC clients with Kubernetes
+	// ServiceAccount tokens (spec.auth.serviceAccountTokens).
+	serviceAccounts serviceAccountTokens
+
 	tokenURL       string
 	proxyNamespace string
 	proxyService   string
@@ -66,12 +69,15 @@ func (r *DataLakeReconciler) reconcileAuth(ctx context.Context, dp *dataplatform
 		return oidcConfig{}, true, nil
 	}
 	if dp.Spec.Auth.IsEmbedded() {
-		return r.reconcileKeycloak(ctx, dp)
+		cfg, ready, err := r.reconcileKeycloak(ctx, dp)
+		useServiceAccountTokens(dp, &cfg)
+		return cfg, ready, err
 	}
 	cfg, err := r.externalOIDC(ctx, dp)
 	if err != nil {
 		return oidcConfig{}, false, err
 	}
+	useServiceAccountTokens(dp, &cfg)
 	setCondition(dp, dataplatformv1alpha1.ConditionAuthReady, metav1.ConditionTrue, reasonReady, "Using external OIDC issuer")
 	return cfg, true, nil
 }
@@ -122,7 +128,9 @@ func (r *DataLakeReconciler) externalOIDC(ctx context.Context, dp *dataplatformv
 		}
 	}
 
-	issuer := strings.TrimRight(spec.Issuer, "/")
+	// Keep the issuer exactly as written. Validators compare it to the token's
+	// iss claim, and some providers (JumpCloud) end it with a slash.
+	issuer := spec.Issuer
 	return oidcConfig{
 		enabled:          true,
 		issuer:           issuer,
@@ -142,6 +150,9 @@ func (r *DataLakeReconciler) externalOIDC(ctx context.Context, dp *dataplatformv
 func (r *DataLakeReconciler) oidcAccessToken(ctx context.Context, cfg oidcConfig) (string, error) {
 	if !cfg.enabled {
 		return "", nil
+	}
+	if cfg.serviceAccounts.enabled {
+		return r.serviceAccountToken(ctx, cfg.serviceAccounts)
 	}
 	form := url.Values{
 		"grant_type":    {"client_credentials"},

@@ -46,6 +46,14 @@ func (r *DataLakeReconciler) reconcileOPA(ctx context.Context, dp *dataplatformv
 	if err := r.applyOPAService(ctx, dp, ns); err != nil {
 		return false, err
 	}
+	if err := r.ensureServiceAccount(ctx, dp, ns, nameOPA, componentOPA, nil); err != nil {
+		return false, err
+	}
+	if oidc.serviceAccounts.enabled {
+		if err := r.applyTokenProxyConfigMap(ctx, dp, ns, componentOPA); err != nil {
+			return false, err
+		}
+	}
 	if err := r.applyOPADeployment(ctx, dp, ns, oidc, fga); err != nil {
 		return false, err
 	}
@@ -207,6 +215,7 @@ func (r *DataLakeReconciler) applyOPADeployment(
 		}
 		deploy.Spec.Replicas = ptr.To(int32(1))
 		deploy.Spec.Template.Labels = labels
+		deploy.Spec.Template.Spec.ServiceAccountName = nameOPA
 		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(uidOPA, gidOPA)
 		deploy.Spec.Template.Spec.Containers = []corev1.Container{{
 			Name:  nameOPA,
@@ -222,7 +231,7 @@ func (r *DataLakeReconciler) applyOPADeployment(
 			},
 			Env: append([]corev1.EnvVar{
 				{Name: "LAKEKEEPER_URL", Value: lkURL},
-				{Name: "LAKEKEEPER_TOKEN_ENDPOINT", Value: oidc.tokenURL},
+				{Name: "LAKEKEEPER_TOKEN_ENDPOINT", Value: oidc.machineTokenURL()},
 				{Name: "LAKEKEEPER_CLIENT_ID", Value: oidc.opaClientID},
 				{
 					Name: "LAKEKEEPER_CLIENT_SECRET",
@@ -263,6 +272,9 @@ func (r *DataLakeReconciler) applyOPADeployment(
 				},
 			},
 		}}
+		if oidc.serviceAccounts.enabled {
+			withTokenProxy(&deploy.Spec.Template.Spec, oidc.serviceAccounts)
+		}
 		return nil
 	})
 }

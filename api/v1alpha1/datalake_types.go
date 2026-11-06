@@ -58,7 +58,13 @@ const (
 	DefaultKeycloakImage = "quay.io/keycloak/keycloak:26.3.3"
 	DefaultOpenFGAImage  = "openfga/openfga:v1.8.12"
 	DefaultOPAImage      = "openpolicyagent/opa:1.10.1"
-	DefaultOpenFGAStore  = "lakekeeper"
+	// DefaultTokenProxyImage serves a projected ServiceAccount token as an
+	// OAuth2 token response, for auth.serviceAccountTokens.
+	DefaultTokenProxyImage = "busybox:1.37.0"
+	// DefaultServiceAccountTokenAudience is the audience LakeKeeper requires on
+	// Kubernetes ServiceAccount tokens.
+	DefaultServiceAccountTokenAudience = "lakekeeper"
+	DefaultOpenFGAStore                = "lakekeeper"
 	// DefaultSampleDataImage runs the one-shot Trino SQL seed Job.
 	DefaultSampleDataImage = "python:3.12-alpine"
 	// DefaultSampleDataSchema is the Iceberg namespace / Trino schema used for demo tables.
@@ -165,6 +171,34 @@ type AuthSpec struct {
 	// oidc is required when embedded is false.
 	// +optional
 	OIDC *OIDCSpec `json:"oidc,omitempty"`
+
+	// serviceAccountTokens makes the operator, Trino's Iceberg catalog, and the
+	// OPA bridge authenticate to LakeKeeper with Kubernetes ServiceAccount
+	// tokens instead of OIDC client credentials. Use it with identity providers
+	// that have no client-credentials grant, such as JumpCloud. People still
+	// sign in through the OIDC provider.
+	//
+	// LakeKeeper validates the tokens with the TokenReview API, so the operator
+	// binds the lakekeeper ServiceAccount to system:auth-delegator. Trino and
+	// OPA run a small sidecar that serves their projected token on a localhost
+	// token endpoint, so the kubelet's token rotation reaches them without a
+	// restart.
+	// +optional
+	ServiceAccountTokens *ServiceAccountTokensSpec `json:"serviceAccountTokens,omitempty"`
+}
+
+// ServiceAccountTokensSpec configures Kubernetes ServiceAccount authentication
+// between platform components and LakeKeeper.
+type ServiceAccountTokensSpec struct {
+	// audience is requested in every token and is the only audience LakeKeeper
+	// accepts for Kubernetes tokens. Defaults to "lakekeeper".
+	// +optional
+	Audience string `json:"audience,omitempty"`
+
+	// proxyImage serves the projected token on 127.0.0.1 next to Trino and
+	// OPA. It must provide busybox httpd with CGI support.
+	// +optional
+	ProxyImage string `json:"proxyImage,omitempty"`
 }
 
 // KeycloakSpec configures operator-managed Keycloak.
@@ -198,9 +232,11 @@ type KeycloakSpec struct {
 
 // OIDCSpec points at an existing OpenID Connect provider (Okta, JumpCloud, Keycloak, ...).
 type OIDCSpec struct {
-	// issuer is the OIDC issuer URL (no trailing slash).
+	// issuer is the OIDC issuer URL, exactly as the provider's discovery
+	// document and tokens state it, including any trailing slash.
 	// Example (Okta): https://example.okta.com/oauth2/default
-	// Example (JumpCloud / Keycloak): https://idp.example.com/realms/company
+	// Example (JumpCloud): https://oauth.id.jumpcloud.com/
+	// Example (Keycloak): https://idp.example.com/realms/company
 	// +kubebuilder:validation:MinLength=1
 	Issuer string `json:"issuer"`
 
@@ -213,12 +249,16 @@ type OIDCSpec struct {
 	// +optional
 	ClientID string `json:"clientID,omitempty"`
 
-	// tokenEndpoint is the OAuth2 token URL. Defaults to issuer + "/protocol/openid-connect/token"
-	// (Keycloak / JumpCloud). Okta typically needs "/v1/token" on the authorization server.
+	// tokenEndpoint is the OAuth2 token URL for the client-credentials grant.
+	// Defaults to issuer + "/protocol/openid-connect/token" (Keycloak). Okta
+	// typically needs "/v1/token" on the authorization server. Unused with
+	// auth.serviceAccountTokens.
 	// +optional
 	TokenEndpoint string `json:"tokenEndpoint,omitempty"`
 
-	// scope is requested during the client-credentials grant. Defaults to "lakekeeper".
+	// scope is requested during the client-credentials grant and by the
+	// LakeKeeper UI, which adds "openid". Defaults to "lakekeeper". Set it to
+	// "openid" for providers without custom scopes, such as JumpCloud.
 	// +optional
 	Scope string `json:"scope,omitempty"`
 

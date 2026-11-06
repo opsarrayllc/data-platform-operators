@@ -66,6 +66,11 @@ spec:
                   oidc:
                     description: oidc is required when enabled is true.
                     properties:
+                      authorizationEndpoint:
+                        description: |-
+                          authorizationEndpoint is the browser login URL. Defaults to Keycloak's
+                          path on publicIssuer, or the discovered value.
+                        type: string
                       credentialsSecretRef:
                         description: |-
                           credentialsSecretRef points at a Secret with the Superset and Trino
@@ -91,15 +96,39 @@ spec:
                             description: trinoClientSecretKey defaults to trinoClientSecret.
                             type: string
                         type: object
+                      groupsClaim:
+                        description: |-
+                          groupsClaim is the ID token or userinfo claim that lists the user's
+                          groups. Group names map to Superset roles: platform-admins to Admin,
+                          data-engineers to Alpha, analysts to Gamma. In JumpCloud, set the
+                          application's group attribute name to this value. Defaults to "groups".
+                        type: string
                       issuer:
                         description: |-
-                          issuer is the in-cluster issuer URL Superset uses for tokens and JWKS.
-                          Example: http://keycloak.keycloak.svc:8080/realms/dataplatform.
+                          issuer is the issuer URL Superset uses for tokens and JWKS, exactly as
+                          the provider states it, including any trailing slash.
+                          Example (Keycloak): http://keycloak.keycloak.svc:8080/realms/dataplatform.
+                          Example (JumpCloud): https://oauth.id.jumpcloud.com/
+                        type: string
+                      jwksURI:
+                        description: |-
+                          jwksURI is the signing key URL for ID tokens. Defaults to Keycloak's
+                          path on issuer, or the discovered value.
                         type: string
                       publicIssuer:
                         description: |-
                           publicIssuer is the issuer browsers use. Defaults to issuer.
                           Example: https://keycloak.data-platform.local/realms/dataplatform.
+                        type: string
+                      tokenEndpoint:
+                        description: |-
+                          tokenEndpoint is the token URL Superset calls. Defaults to Keycloak's
+                          path on issuer, or the discovered value.
+                        type: string
+                      userinfoEndpoint:
+                        description: |-
+                          userinfoEndpoint returns the signed-in user's claims. Defaults to
+                          Keycloak's path on issuer, or the discovered value.
                         type: string
                     type: object
                 type: object
