@@ -67,6 +67,14 @@ func TestRoleAssigneeUsers(t *testing.T) {
 	if _, err := roleAssigneeUsers([]byte("not json")); err == nil {
 		t.Fatal("expected a parse error")
 	}
+
+	// LakeKeeper 0.13.3's response for a new role, fetched without a relations
+	// filter: only the creator's ownership, which is not a member.
+	live := []byte(`{"assignments":[{"type":"ownership","user":"kubernetes~system:serviceaccount:lakekeeper:lakekeeper-operator"}]}`)
+	users, err = roleAssigneeUsers(live)
+	if err != nil || len(users) != 0 {
+		t.Fatalf("ownership must not count as membership, got %v, %v", users, err)
+	}
 }
 
 // fakeJumpCloud serves the subset of the JumpCloud API the sync uses.
