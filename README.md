@@ -168,6 +168,10 @@ whose token contains the group runs as that account: `platform-admins` can
 delete workflows, `data-engineers` can create and update them, and `analysts`
 can read them. A token with none of those groups cannot sign in.
 
+### External identity providers
+
+Keycloak is for local development. To sign people in through JumpCloud, Okta, or another provider, and to run machine-to-LakeKeeper calls on Kubernetes ServiceAccount tokens, see [`docs/jumpcloud.md`](docs/jumpcloud.md).
+
 ## Row-level access control
 
 LakeKeeper and OpenFGA authorize whole objects: a warehouse, a namespace, a

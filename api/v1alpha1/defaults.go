@@ -320,6 +320,16 @@ func (s *OIDCSpec) TokenEndpointOrDefault() string {
 	return strings.TrimRight(s.Issuer, "/") + "/protocol/openid-connect/token"
 }
 
+// AudienceOrDefault returns the audience of Kubernetes tokens for LakeKeeper.
+func (s *ServiceAccountTokensSpec) AudienceOrDefault() string {
+	return stringOrDefault(s.Audience, DefaultServiceAccountTokenAudience)
+}
+
+// ProxyImageOrDefault returns the token sidecar image.
+func (s *ServiceAccountTokensSpec) ProxyImageOrDefault() string {
+	return stringOrDefault(s.ProxyImage, DefaultTokenProxyImage)
+}
+
 // ClientSecretKeyOrDefault returns the Secret key for the OIDC client secret.
 func (s *OIDCCredentialsSecretRef) ClientSecretKeyOrDefault() string {
 	return stringOrDefault(s.ClientSecretKey, "clientSecret")

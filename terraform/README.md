@@ -110,7 +110,7 @@ To use one, start from the example for your cloud under [`examples/`](examples).
 
    `systemIdentity` makes LakeKeeper store an `aws-system-identity` warehouse credential instead of an access key. LakeKeeper loads credentials from its pod, assumes the warehouse role for its own reads and writes, and assumes it again with a table-scoped policy to vend credentials to Trino.
 
-   If you set `sts_enabled = false` on the module, Trino gets no vended credentials. The module then associates the warehouse role with Trino's ServiceAccount (`default` in `trino`) too, and Trino reads S3 through its own Pod Identity.
+   If you set `sts_enabled = false` on the module, Trino gets no vended credentials. The module then associates the warehouse role with Trino's ServiceAccount (`trino` in the `trino` namespace) too, and Trino reads S3 through its own Pod Identity.
 
 The operator reuses the `lakekeeper` namespace because it already exists. Because Terraform owns that namespace, `terraform destroy` also deletes LakeKeeper.
 

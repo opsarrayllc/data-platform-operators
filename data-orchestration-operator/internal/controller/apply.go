@@ -66,6 +66,10 @@ const (
 	portHealthz = int32(6060)
 	portMetrics = int32(9090)
 
+	// volumeOIDCCA mounts spec.auth.oidc.caConfigMapName into argo-server.
+	volumeOIDCCA     = "oidc-ca"
+	keyOIDCCA        = "ca.crt"
+	oidcCADir        = "/etc/oidc-ca"
 	ingressNamespace = "ingress-nginx"
 	ingressService   = "ingress-nginx-controller"
 

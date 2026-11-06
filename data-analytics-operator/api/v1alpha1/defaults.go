@@ -112,6 +112,11 @@ func (s *AuthSpec) IsEnabled() bool {
 	return s != nil && s.Enabled != nil && *s.Enabled
 }
 
+// GroupsClaimOrDefault returns the claim that lists the user's groups.
+func (s *OIDCSpec) GroupsClaimOrDefault() string {
+	return stringOrDefault(s.GroupsClaim, "groups")
+}
+
 // SupersetClientIDKeyOrDefault returns the Secret key for the Superset client id.
 func (s *CredentialsSecretRef) SupersetClientIDKeyOrDefault() string {
 	if s == nil {

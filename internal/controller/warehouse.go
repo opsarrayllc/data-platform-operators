@@ -88,37 +88,44 @@ func (r *DataLakeReconciler) reconcileWarehouse(ctx context.Context, dp *datapla
 }
 
 // catalogPrincipals lists the identities that need grants once the catalog is
-// bootstrapped. Empty for external issuers, where the operator does not own the
-// user list and cannot predict subjects.
+// bootstrapped. The human admin exists only with embedded Keycloak, where the
+// operator owns the user list. Machine principals are known for Keycloak and
+// for ServiceAccount tokens, but not for external OIDC clients.
 func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []CatalogPrincipal {
-	if oidc.adminSubject == "" {
-		return nil
+	var principals []CatalogPrincipal
+	if oidc.adminSubject != "" {
+		principals = append(principals, CatalogPrincipal{
+			Subject:         oidcSubjectPrefix + oidc.adminSubject,
+			Name:            oidc.adminName,
+			Email:           oidc.adminEmail,
+			Type:            "human",
+			ServerRelation:  catalogRelationAdmin,
+			ProjectRelation: catalogRelationProjectAdmin,
+		})
 	}
-	principals := []CatalogPrincipal{{
-		Subject:         oidcSubjectPrefix + oidc.adminSubject,
-		Name:            oidc.adminName,
-		Email:           oidc.adminEmail,
-		Type:            "human",
-		ServerRelation:  catalogRelationAdmin,
-		ProjectRelation: catalogRelationProjectAdmin,
-	}}
 	// Trino's Iceberg REST connector uses client-credentials as this
 	// application. Without a project grant LakeKeeper hides warehouses and
 	// Trino surfaces "A warehouse '…' does not exist".
-	if oidc.trinoSubject != "" {
+	trinoName, opaName := oidc.trinoClientID, oidc.opaClientID
+	if oidc.serviceAccounts.enabled {
+		// Name ServiceAccount principals after the account, not the OIDC
+		// client, which external issuers share between Trino and OPA.
+		trinoName, opaName = nameTrino, nameOPA
+	}
+	if oidc.trinoPrincipal != "" {
 		principals = append(principals, CatalogPrincipal{
-			Subject:         oidcSubjectPrefix + oidc.trinoSubject,
-			Name:            oidc.trinoClientID,
+			Subject:         oidc.trinoPrincipal,
+			Name:            trinoName,
 			Type:            "application",
 			ProjectRelation: catalogRelationProjectAdmin,
 		})
 	}
 	// The OPA bridge asks LakeKeeper whether other users may act, which is a
 	// privileged read it cannot perform without security_admin.
-	if dp.Spec.Authz.IsEnabled() && oidc.opaSubject != "" {
+	if dp.Spec.Authz.IsEnabled() && oidc.opaPrincipal != "" {
 		principals = append(principals, CatalogPrincipal{
-			Subject:         oidcSubjectPrefix + oidc.opaSubject,
-			Name:            oidc.opaClientID,
+			Subject:         oidc.opaPrincipal,
+			Name:            opaName,
 			Type:            "application",
 			ProjectRelation: catalogRelationSecurityAdmin,
 		})

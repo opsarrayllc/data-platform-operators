@@ -70,8 +70,9 @@ var _ = Describe("Orchestration Controller", func() {
 					Auth: orchestrationv1alpha1.AuthSpec{
 						Enabled: ptr.To(true),
 						OIDC: orchestrationv1alpha1.OIDCSpec{
-							Issuer:       "http://keycloak.keycloak.svc:8080/realms/dataplatform",
-							PublicIssuer: "https://keycloak.data-platform.local/realms/dataplatform",
+							Issuer:          "http://keycloak.keycloak.svc:8080/realms/dataplatform",
+							PublicIssuer:    "https://keycloak.data-platform.local/realms/dataplatform",
+							CAConfigMapName: "data-platform-ca",
 							CredentialsSecretRef: &orchestrationv1alpha1.CredentialsSecretRef{
 								Name:      "oidc",
 								Namespace: "keycloak",
@@ -110,6 +111,13 @@ var _ = Describe("Orchestration Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameServer, Namespace: orchestrationv1alpha1.DefaultNamespace}, server)).To(Succeed())
 		Expect(server.Spec.Template.Spec.Containers[0].Args).To(ContainElement("--auth-mode"))
 		Expect(server.Spec.Template.Spec.Containers[0].Args).To(ContainElement("sso"))
+
+		By("trusting the extra CA next to the system roots")
+		Expect(server.Spec.Template.Spec.Containers[0].Env).To(ContainElement(corev1.EnvVar{Name: "SSL_CERT_DIR", Value: oidcCADir}))
+		Expect(server.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(corev1.VolumeMount{
+			Name: volumeOIDCCA, MountPath: oidcCADir + "/" + keyOIDCCA, SubPath: keyOIDCCA, ReadOnly: true,
+		}))
+		Expect(server.Spec.Template.Spec.Volumes).To(ContainElement(HaveField("VolumeSource.ConfigMap.Name", "data-platform-ca")))
 
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameController, Namespace: orchestrationv1alpha1.DefaultNamespace}, &appsv1.Deployment{})).To(Succeed())
 

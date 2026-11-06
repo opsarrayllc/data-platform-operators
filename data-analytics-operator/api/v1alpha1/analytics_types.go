@@ -219,9 +219,17 @@ type AuthSpec struct {
 }
 
 // OIDCSpec describes the identity provider Superset and Trino share.
+//
+// For a Keycloak issuer (a path with /realms/), endpoints default to
+// Keycloak's paths, so the backchannel can use the in-cluster issuer while
+// browsers use publicIssuer. For any other issuer, such as JumpCloud, the
+// operator reads endpoints from the issuer's discovery document. Set an
+// endpoint field to override either.
 type OIDCSpec struct {
-	// issuer is the in-cluster issuer URL Superset uses for tokens and JWKS.
-	// Example: http://keycloak.keycloak.svc:8080/realms/dataplatform.
+	// issuer is the issuer URL Superset uses for tokens and JWKS, exactly as
+	// the provider states it, including any trailing slash.
+	// Example (Keycloak): http://keycloak.keycloak.svc:8080/realms/dataplatform.
+	// Example (JumpCloud): https://oauth.id.jumpcloud.com/
 	// +optional
 	Issuer string `json:"issuer,omitempty"`
 
@@ -229,6 +237,33 @@ type OIDCSpec struct {
 	// Example: https://keycloak.data-platform.local/realms/dataplatform.
 	// +optional
 	PublicIssuer string `json:"publicIssuer,omitempty"`
+
+	// authorizationEndpoint is the browser login URL. Defaults to Keycloak's
+	// path on publicIssuer, or the discovered value.
+	// +optional
+	AuthorizationEndpoint string `json:"authorizationEndpoint,omitempty"`
+
+	// tokenEndpoint is the token URL Superset calls. Defaults to Keycloak's
+	// path on issuer, or the discovered value.
+	// +optional
+	TokenEndpoint string `json:"tokenEndpoint,omitempty"`
+
+	// jwksURI is the signing key URL for ID tokens. Defaults to Keycloak's
+	// path on issuer, or the discovered value.
+	// +optional
+	JWKSURI string `json:"jwksURI,omitempty"`
+
+	// userinfoEndpoint returns the signed-in user's claims. Defaults to
+	// Keycloak's path on issuer, or the discovered value.
+	// +optional
+	UserinfoEndpoint string `json:"userinfoEndpoint,omitempty"`
+
+	// groupsClaim is the ID token or userinfo claim that lists the user's
+	// groups. Group names map to Superset roles: platform-admins to Admin,
+	// data-engineers to Alpha, analysts to Gamma. In JumpCloud, set the
+	// application's group attribute name to this value. Defaults to "groups".
+	// +optional
+	GroupsClaim string `json:"groupsClaim,omitempty"`
 
 	// credentialsSecretRef points at a Secret with the Superset and Trino
 	// confidential-client credentials. The data lake operator writes these

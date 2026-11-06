@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"fmt"
-	"maps"
 	"strconv"
 	"strings"
 
@@ -50,6 +49,16 @@ func (r *DataLakeReconciler) reconcileLakekeeper(
 	if err := r.applyLakekeeperServiceAccount(ctx, dp, ns); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
+	}
+	if oidc.serviceAccounts.enabled {
+		if err := r.ensureServiceAccount(ctx, dp, ns, nameOperatorServiceAccount, componentLakekeeper, nil); err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+		if err := r.applyTokenReviewBinding(ctx, dp, ns); err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
 	}
 	if err := r.applyLakekeeperService(ctx, dp, ns); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionLakekeeperReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -100,18 +109,11 @@ func (r *DataLakeReconciler) applyLakekeeperServiceAccount(
 	dp *dataplatformv1alpha1.DataLake,
 	ns string,
 ) error {
-	sa := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: nameLakekeeper, Namespace: ns}}
-	labels := labelsFor(dp, componentLakekeeper)
-	return r.apply(ctx, dp, sa, func() error {
-		ensureLabels(sa, labels)
-		if id := dp.Spec.Storage.AWSSystemIdentity(); id != nil {
-			if sa.Annotations == nil {
-				sa.Annotations = map[string]string{}
-			}
-			maps.Copy(sa.Annotations, id.ServiceAccountAnnotations)
-		}
-		return nil
-	})
+	var annotations map[string]string
+	if id := dp.Spec.Storage.AWSSystemIdentity(); id != nil {
+		annotations = id.ServiceAccountAnnotations
+	}
+	return r.ensureServiceAccount(ctx, dp, ns, nameLakekeeper, componentLakekeeper, annotations)
 }
 
 func (r *DataLakeReconciler) applyLakekeeperService(
@@ -227,6 +229,7 @@ func lakekeeperEnv(dp *dataplatformv1alpha1.DataLake, conn postgresConn, oidc oi
 		env = append(env, corev1.EnvVar{Name: "LAKEKEEPER__PG_SSL_MODE", Value: conn.SSLMode})
 	}
 	env = append(env, lakekeeperSystemIdentityEnv(dp)...)
+	env = append(env, lakekeeperKubernetesAuthEnv(oidc.serviceAccounts)...)
 	if fga.enabled {
 		env = append(env,
 			corev1.EnvVar{Name: "LAKEKEEPER__AUTHZ_BACKEND", Value: "openfga"},
@@ -305,9 +308,20 @@ func lakekeeperTrustedEngineEnv(oidc oidcConfig) []corev1.EnvVar {
 	if oidc.opaClientID != "" && oidc.opaClientID != oidc.trinoClientID {
 		audiences = oidc.trinoClientID + "," + oidc.opaClientID
 	}
-	return []corev1.EnvVar{
+	env := []corev1.EnvVar{
 		{Name: "LAKEKEEPER__TRUSTED_ENGINES__TRINO__TYPE", Value: "trino"},
 		{Name: "LAKEKEEPER__TRUSTED_ENGINES__TRINO__OWNER_PROPERTY", Value: "trino.run-as-owner"},
 		{Name: "LAKEKEEPER__TRUSTED_ENGINES__TRINO__IDENTITIES__OIDC__AUDIENCES", Value: "[" + audiences + "]"},
 	}
+	if oidc.serviceAccounts.enabled {
+		// Trino and OPA reach LakeKeeper as ServiceAccounts, so trust them by
+		// subject. Audiences cannot tell them apart: every token carries the same one.
+		subjects := strings.TrimPrefix(oidc.trinoPrincipal, kubernetesSubjectPrefix) + "," +
+			strings.TrimPrefix(oidc.opaPrincipal, kubernetesSubjectPrefix)
+		env = append(env, corev1.EnvVar{
+			Name:  "LAKEKEEPER__TRUSTED_ENGINES__TRINO__IDENTITIES__KUBERNETES__SUBJECTS",
+			Value: "[" + subjects + "]",
+		})
+	}
+	return env
 }

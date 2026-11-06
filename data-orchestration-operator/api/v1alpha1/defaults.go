@@ -41,6 +41,11 @@ func (s *ServiceSpec) TypeOrDefault() corev1.ServiceType {
 	return s.Type
 }
 
+// GroupsClaimOrDefault returns the claim that lists the user's groups.
+func (s *OIDCSpec) GroupsClaimOrDefault() string {
+	return stringOrDefault(s.GroupsClaim, "groups")
+}
+
 // IsEnabled reports whether OIDC login is on. Nil defaults to false.
 func (s *AuthSpec) IsEnabled() bool {
 	return s != nil && s.Enabled != nil && *s.Enabled

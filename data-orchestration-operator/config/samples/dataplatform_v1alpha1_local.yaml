@@ -17,6 +17,8 @@ spec:
     oidc:
       issuer: http://keycloak.keycloak.svc:8080/realms/dataplatform
       publicIssuer: https://keycloak.data-platform.local/realms/dataplatform
+      # Created by make kind-up: the mkcert root, so Argo trusts the ingress certificate.
+      caConfigMapName: data-platform-ca
       credentialsSecretRef:
         name: oidc
         namespace: keycloak
