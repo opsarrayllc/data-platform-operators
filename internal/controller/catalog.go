@@ -37,6 +37,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/portforward"
 	"k8s.io/client-go/transport/spdy"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // CatalogClient talks to LakeKeeper's management API and can POST form data
@@ -92,6 +93,60 @@ type CatalogAccessRole struct {
 	ProjectRelations   []string
 	WarehouseRelations []string
 	Members            []CatalogPrincipal
+	// PruneMemberPrefix, when set, removes user assignees whose id starts with
+	// it and who are not in Members. Empty only ever adds members.
+	PruneMemberPrefix string
+}
+
+// roleMemberDiff compares a role's current user assignees with the wanted
+// members. It returns the members to add and the user ids to remove; only ids
+// starting with prunePrefix are ever removed, and none when it is empty.
+func roleMemberDiff(current []string, wanted []CatalogPrincipal, prunePrefix string) ([]CatalogPrincipal, []string) {
+	have := map[string]bool{}
+	for _, id := range current {
+		have[id] = true
+	}
+	want := map[string]bool{}
+	var add []CatalogPrincipal
+	for _, member := range wanted {
+		if want[member.Subject] {
+			continue
+		}
+		want[member.Subject] = true
+		if !have[member.Subject] {
+			add = append(add, member)
+		}
+	}
+	var remove []string
+	if prunePrefix != "" {
+		for _, id := range current {
+			if strings.HasPrefix(id, prunePrefix) && !want[id] {
+				remove = append(remove, id)
+			}
+		}
+	}
+	return add, remove
+}
+
+// roleAssigneeUsers parses GET /management/v1/permissions/role/{id}/assignments
+// and returns the user ids assigned directly. Role assignees are skipped.
+func roleAssigneeUsers(body []byte) ([]string, error) {
+	var resp struct {
+		Assignments []struct {
+			Type string `json:"type"`
+			User string `json:"user"`
+		} `json:"assignments"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil, fmt.Errorf("parse role assignments: %w", err)
+	}
+	var users []string
+	for _, a := range resp.Assignments {
+		if a.Type == "assignee" && a.User != "" {
+			users = append(users, a.User)
+		}
+	}
+	return users, nil
 }
 
 // AuthzTuple is one OpenFGA relationship, as in "user:alice member group:analysts".
@@ -267,19 +322,47 @@ func (c *proxyCatalogClient) EnsureAccessRoles(
 		if err := c.grantRoleAccess(ctx, namespace, service, port, bearer, roleID, warehouseID, role); err != nil {
 			return err
 		}
+		assignmentsPath := "management/v1/permissions/role/" + roleID + "/assignments"
+		status, body, err := c.do(ctx, http.MethodGet, namespace, service, port,
+			assignmentsPath+"?relations=assignee", bearer, nil)
+		if err != nil {
+			return err
+		}
+		if !isSuccess(status) {
+			return fmt.Errorf("list members of role %s returned %d: %s", role.Name, status, truncate(body))
+		}
+		current, err := roleAssigneeUsers(body)
+		if err != nil {
+			return err
+		}
+		add, remove := roleMemberDiff(current, role.Members, role.PruneMemberPrefix)
+		// Provision every member, not just new ones, so name and email changes
+		// in the directory reach LakeKeeper (update-if-exists).
 		for _, member := range role.Members {
 			if err := c.post(ctx, namespace, service, port,
 				"management/v1/user", bearer, catalogUserJSON(member), "provision user "+member.Name); err != nil {
 				return err
 			}
+		}
+		for _, member := range add {
 			grant := map[string]any{
 				"writes": []map[string]any{{"type": "assignee", "user": member.Subject}},
 			}
-			if err := c.post(ctx, namespace, service, port,
-				"management/v1/permissions/role/"+roleID+"/assignments", bearer, grant,
+			if err := c.post(ctx, namespace, service, port, assignmentsPath, bearer, grant,
 				"assign "+member.Name+" to role "+role.Name); err != nil {
 				return err
 			}
+		}
+		if len(remove) > 0 {
+			deletes := make([]map[string]any, 0, len(remove))
+			for _, id := range remove {
+				deletes = append(deletes, map[string]any{"type": "assignee", "user": id})
+			}
+			if err := c.post(ctx, namespace, service, port, assignmentsPath, bearer,
+				map[string]any{"deletes": deletes}, "remove stale members from role "+role.Name); err != nil {
+				return err
+			}
+			logf.FromContext(ctx).Info("Removed stale LakeKeeper role members", "role", role.Name, "users", remove)
 		}
 	}
 	return nil

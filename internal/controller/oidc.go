@@ -35,6 +35,8 @@ type oidcConfig struct {
 	audience         string
 	scope            string
 	uiClientID       string
+	uiTokenType      string
+	subjectClaim     string
 	trinoClientID    string
 	trinoSecret      string
 	opaClientID      string
@@ -137,6 +139,8 @@ func (r *DataLakeReconciler) externalOIDC(ctx context.Context, dp *dataplatformv
 		audience:         spec.AudienceOrDefault(),
 		scope:            spec.ScopeOrDefault(),
 		uiClientID:       clientID,
+		uiTokenType:      spec.UITokenType,
+		subjectClaim:     spec.SubjectClaim,
 		trinoClientID:    trinoID,
 		trinoSecret:      trinoSecret,
 		opaClientID:      trinoID,
