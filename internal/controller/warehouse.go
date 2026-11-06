@@ -98,7 +98,7 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []Cat
 			Subject:         oidcSubjectPrefix + oidc.adminSubject,
 			Name:            oidc.adminName,
 			Email:           oidc.adminEmail,
-			Type:            "human",
+			Type:            catalogUserTypeHuman,
 			ServerRelation:  catalogRelationAdmin,
 			ProjectRelation: catalogRelationProjectAdmin,
 		})
