@@ -72,6 +72,67 @@ spec:
                       catalog, and the Trino coordinator. The Web UI uses OAuth only when
                       spec.trino.publicURL is set. Defaults to true.
                     type: boolean
+                  groupSync:
+                    description: |-
+                      groupSync fills the LakeKeeper roles platform-admins, data-engineers, and
+                      analysts from an external directory when auth.embedded is false. Embedded
+                      Keycloak syncs its own groups and ignores this. Role membership mirrors the
+                      directory: users added to a role by hand are removed on the next sync.
+                    properties:
+                      jumpcloud:
+                        description: jumpcloud reads group membership from the JumpCloud
+                          Directory API.
+                        properties:
+                          apiKeySecretRef:
+                            description: |-
+                              apiKeySecretRef locates a JumpCloud API key. JumpCloud keys carry every
+                              permission of the admin who made them, so use a read-only admin.
+                            properties:
+                              key:
+                                default: apiKey
+                                description: key holds the API key.
+                                type: string
+                              name:
+                                description: name of the Secret.
+                                type: string
+                              namespace:
+                                description: namespace of the Secret.
+                                type: string
+                            required:
+                            - name
+                            - namespace
+                            type: object
+                          apiURL:
+                            description: |-
+                              apiURL is the JumpCloud API base URL. Defaults to
+                              https://console.jumpcloud.com (use https://console.eu.jumpcloud.com in the EU).
+                            type: string
+                          groupNames:
+                            additionalProperties:
+                              type: string
+                            description: |-
+                              groupNames maps a LakeKeeper role (platform-admins, data-engineers,
+                              analysts) to the JumpCloud user group that fills it. Roles not listed use
+                              a JumpCloud group of the same name.
+                            type: object
+                          orgID:
+                            description: orgID is sent as x-org-id. Only multi-tenant
+                              (MSP) admins need it.
+                            type: string
+                          subjectAttribute:
+                            description: |-
+                              subjectAttribute is the JumpCloud user attribute whose value equals the
+                              claim LakeKeeper uses as the user id (spec.auth.oidc.subjectClaim). Members
+                              become "oidc~<value>". "id" is the JumpCloud user id. Defaults to "id".
+                            enum:
+                            - id
+                            - email
+                            - username
+                            type: string
+                        required:
+                        - apiKeySecretRef
+                        type: object
+                    type: object
                   keycloak:
                     description: |-
                       keycloak configures the operator-managed Keycloak instance.
@@ -234,12 +295,30 @@ spec:
                           LakeKeeper UI, which adds "openid". Defaults to "lakekeeper". Set it to
                           "openid" for providers without custom scopes, such as JumpCloud.
                         type: string
+                      subjectClaim:
+                        description: |-
+                          subjectClaim is the token claim LakeKeeper uses as the user id, which
+                          becomes "oidc~<value>". LakeKeeper otherwise prefers "oid", then "sub".
+                          Set it explicitly when anything else must predict user ids, such as
+                          group sync.
+                        type: string
                       tokenEndpoint:
                         description: |-
                           tokenEndpoint is the OAuth2 token URL for the client-credentials grant.
                           Defaults to issuer + "/protocol/openid-connect/token" (Keycloak). Okta
                           typically needs "/v1/token" on the authorization server. Unused with
                           auth.serviceAccountTokens.
+                        type: string
+                      uiTokenType:
+                        description: |-
+                          uiTokenType is the token the LakeKeeper UI sends to LakeKeeper after sign-in:
+                          "access_token" (default) or "id_token". LakeKeeper only accepts JWTs, so
+                          providers that issue opaque access tokens, such as JumpCloud, need
+                          "id_token". The ID token's aud is the UI client ID, so audience must
+                          include it.
+                        enum:
+                        - access_token
+                        - id_token
                         type: string
                     required:
                     - issuer

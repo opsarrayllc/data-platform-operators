@@ -795,6 +795,8 @@ var _ = Describe("DataLake Controller", func() {
 						Audience:      "api://lakekeeper",
 						ClientID:      "lakekeeper",
 						Scope:         "openid",
+						UITokenType:   "id_token",
+						SubjectClaim:  "sub",
 						CredentialsSecretRef: &dataplatformv1alpha1.OIDCCredentialsSecretRef{
 							Name:      "oidc-credentials",
 							Namespace: nameLakekeeper,
@@ -813,6 +815,8 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameLakekeeper, Namespace: nameLakekeeper}, deploy)).To(Succeed())
 		Expect(envValue(deploy.Spec.Template.Spec.Containers[0].Env, "LAKEKEEPER__OPENID_PROVIDER_URI")).To(Equal("https://example.okta.com/oauth2/default"))
 		Expect(envValue(deploy.Spec.Template.Spec.Containers[0].Env, "LAKEKEEPER__OPENID_AUDIENCE")).To(Equal("api://lakekeeper"))
+		Expect(envValue(deploy.Spec.Template.Spec.Containers[0].Env, "LAKEKEEPER__UI__OPENID_TOKEN_TYPE")).To(Equal("id_token"))
+		Expect(envValue(deploy.Spec.Template.Spec.Containers[0].Env, "LAKEKEEPER__OPENID_SUBJECT_CLAIM")).To(Equal("sub"))
 
 		catalogSecret := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoCatalog, Namespace: nameTrino}, catalogSecret)).To(Succeed())

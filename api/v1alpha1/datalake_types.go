@@ -185,6 +185,63 @@ type AuthSpec struct {
 	// restart.
 	// +optional
 	ServiceAccountTokens *ServiceAccountTokensSpec `json:"serviceAccountTokens,omitempty"`
+
+	// groupSync fills the LakeKeeper roles platform-admins, data-engineers, and
+	// analysts from an external directory when auth.embedded is false. Embedded
+	// Keycloak syncs its own groups and ignores this. Role membership mirrors the
+	// directory: users added to a role by hand are removed on the next sync.
+	// +optional
+	GroupSync *GroupSyncSpec `json:"groupSync,omitempty"`
+}
+
+// GroupSyncSpec selects the directory that LakeKeeper role membership comes from.
+type GroupSyncSpec struct {
+	// jumpcloud reads group membership from the JumpCloud Directory API.
+	// +optional
+	JumpCloud *JumpCloudGroupSyncSpec `json:"jumpcloud,omitempty"`
+}
+
+// JumpCloudGroupSyncSpec configures group sync from JumpCloud user groups.
+type JumpCloudGroupSyncSpec struct {
+	// apiKeySecretRef locates a JumpCloud API key. JumpCloud keys carry every
+	// permission of the admin who made them, so use a read-only admin.
+	APIKeySecretRef JumpCloudAPIKeySecretRef `json:"apiKeySecretRef"`
+
+	// orgID is sent as x-org-id. Only multi-tenant (MSP) admins need it.
+	// +optional
+	OrgID string `json:"orgID,omitempty"`
+
+	// apiURL is the JumpCloud API base URL. Defaults to
+	// https://console.jumpcloud.com (use https://console.eu.jumpcloud.com in the EU).
+	// +optional
+	APIURL string `json:"apiURL,omitempty"`
+
+	// subjectAttribute is the JumpCloud user attribute whose value equals the
+	// claim LakeKeeper uses as the user id (spec.auth.oidc.subjectClaim). Members
+	// become "oidc~<value>". "id" is the JumpCloud user id. Defaults to "id".
+	// +kubebuilder:validation:Enum=id;email;username
+	// +optional
+	SubjectAttribute string `json:"subjectAttribute,omitempty"`
+
+	// groupNames maps a LakeKeeper role (platform-admins, data-engineers,
+	// analysts) to the JumpCloud user group that fills it. Roles not listed use
+	// a JumpCloud group of the same name.
+	// +optional
+	GroupNames map[string]string `json:"groupNames,omitempty"`
+}
+
+// JumpCloudAPIKeySecretRef locates the JumpCloud API key.
+type JumpCloudAPIKeySecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret.
+	Namespace string `json:"namespace"`
+
+	// key holds the API key.
+	// +optional
+	// +kubebuilder:default=apiKey
+	Key string `json:"key,omitempty"`
 }
 
 // ServiceAccountTokensSpec configures Kubernetes ServiceAccount authentication
@@ -261,6 +318,22 @@ type OIDCSpec struct {
 	// "openid" for providers without custom scopes, such as JumpCloud.
 	// +optional
 	Scope string `json:"scope,omitempty"`
+
+	// uiTokenType is the token the LakeKeeper UI sends to LakeKeeper after sign-in:
+	// "access_token" (default) or "id_token". LakeKeeper only accepts JWTs, so
+	// providers that issue opaque access tokens, such as JumpCloud, need
+	// "id_token". The ID token's aud is the UI client ID, so audience must
+	// include it.
+	// +kubebuilder:validation:Enum=access_token;id_token
+	// +optional
+	UITokenType string `json:"uiTokenType,omitempty"`
+
+	// subjectClaim is the token claim LakeKeeper uses as the user id, which
+	// becomes "oidc~<value>". LakeKeeper otherwise prefers "oid", then "sub".
+	// Set it explicitly when anything else must predict user ids, such as
+	// group sync.
+	// +optional
+	SubjectClaim string `json:"subjectClaim,omitempty"`
 
 	// credentialsSecretRef locates the client secret (and optional per-component client IDs).
 	// Namespace is required because DataLake is cluster-scoped.
