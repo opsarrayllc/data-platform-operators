@@ -1,0 +1,115 @@
+name: Release
+
+# Cuts the next operator v* tag, with a GitHub release, after Tests pass on
+# main. hack/operator-release.sh picks the version from the conventional
+# commits that touched operator sources since the last v* tag, and skips the
+# release when there are none (docs, Terraform, or CI changes only).
+#
+# A tag pushed with GITHUB_TOKEN does not start other workflows, so this
+# workflow dispatches build-push.yml and release-chart.yml on the new tag
+# itself. Dispatches are exempt from that rule, and the dispatched runs see
+# the tag as their ref, exactly as a pushed tag would.
+
+on:
+  workflow_run:
+    workflows:
+      - Tests
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: >-
+          Version bump. "auto" reads conventional commits and releases nothing
+          when no operator sources changed. Use "major" to reach 1.0.0.
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+        default: auto
+
+permissions: {}
+
+# Releases run one at a time and are never cancelled: each run re-reads the
+# tags the previous one created.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag and publish
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    permissions:
+      # Create the tag and the GitHub release.
+      contents: write
+      # Dispatch the image and chart workflows on the new tag.
+      actions: write
+    env:
+      # The commit Tests passed on, not whatever main points at by now.
+      TARGET_SHA: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      BUMP: ${{ inputs.bump || 'auto' }}
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ env.TARGET_SHA }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Determine version
+        id: version
+        run: |
+          set -euo pipefail
+          existing="$(git tag --points-at "${TARGET_SHA}" -l 'v*')"
+          if [ -n "${existing}" ] && [ "${BUMP}" = "auto" ]; then
+            echo "${TARGET_SHA} is already released as ${existing}"
+            exit 0
+          fi
+          version="$(bash hack/operator-release.sh version "${BUMP}" "${TARGET_SHA}")"
+          if [ -z "${version}" ]; then
+            echo "No operator changes since the last release"
+            exit 0
+          fi
+          if git rev-parse -q --verify "refs/tags/v${version}" >/dev/null; then
+            echo "::error::v${version} already exists on another commit"
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+          echo "Releasing v${version} from ${TARGET_SHA} (bump: ${BUMP})" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Create tag and release
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          bash hack/operator-release.sh notes "${VERSION}" "${TARGET_SHA}" > notes.md
+          gh release create "v${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${TARGET_SHA}" \
+            --title "v${VERSION}" \
+            --notes-file notes.md
+
+      - name: Publish images and charts
+        if: steps.version.outputs.version != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          for workflow in build-push.yml release-chart.yml; do
+            gh workflow run "${workflow}" --repo "${GITHUB_REPOSITORY}" --ref "v${VERSION}"
+            echo "Dispatched ${workflow} on v${VERSION}" >> "${GITHUB_STEP_SUMMARY}"
+          done
