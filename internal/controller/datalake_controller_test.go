@@ -750,6 +750,24 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(cond.Message).To(Equal("Waiting for the warehouse"))
 	})
 
+	It("rejects Trino catalog names the OPA bridge or Trino already use", func() {
+		for _, name := range []string{"prod", "system"} {
+			dl := &dataplatformv1alpha1.DataLake{
+				ObjectMeta: metav1.ObjectMeta{Name: "catalog-" + name},
+				Spec:       dataplatformv1alpha1.DataLakeSpec{Trino: dataplatformv1alpha1.TrinoSpec{Catalog: name}},
+			}
+			err := k8sClient.Create(ctx, dl)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("catalog must not be"))
+		}
+		ok := &dataplatformv1alpha1.DataLake{
+			ObjectMeta: metav1.ObjectMeta{Name: "catalog-keyme"},
+			Spec:       dataplatformv1alpha1.DataLakeSpec{Trino: dataplatformv1alpha1.TrinoSpec{Catalog: "keyme"}},
+		}
+		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, ok)).To(Succeed())
+	})
+
 	It("rejects static keys and a system identity together", func() {
 		both := &dataplatformv1alpha1.DataLake{
 			ObjectMeta: metav1.ObjectMeta{Name: "both-credentials"},

@@ -231,12 +231,12 @@ func (r *DataLakeReconciler) trinoCatalogData(
 
 	if dp.Spec.Lakekeeper.IsEnabled() {
 		props := lakekeeperCatalogProperties(dp, store, oidc)
-		data[nameLakekeeper+".properties"] = []byte(props)
+		data[dp.Spec.Trino.CatalogOrDefault()+".properties"] = []byte(props)
 		parts = append(parts, props)
 	}
 	for name, contents := range dp.Spec.Trino.ExtraCatalogs {
-		if name == nameLakekeeper {
-			logf.FromContext(ctx).Info("Ignoring extraCatalogs entry; lakekeeper catalog is operator-owned", "name", name)
+		if name == dp.Spec.Trino.CatalogOrDefault() {
+			logf.FromContext(ctx).Info("Ignoring extraCatalogs entry; the warehouse catalog is operator-owned", "name", name)
 			continue
 		}
 		data[name+".properties"] = []byte(contents)

@@ -129,21 +129,21 @@ func opaAccessEnv(dp *dataplatformv1alpha1.DataLake, fga openfgaConfig) []corev1
 		},
 	}
 	if dp.Spec.Authz.HasRowFilters() {
-		env = append(env, corev1.EnvVar{Name: "TRINO_ROW_FILTERS", Value: rowFiltersJSON(dp.Spec.Authz.RowFilters)})
+		env = append(env, corev1.EnvVar{Name: "TRINO_ROW_FILTERS", Value: rowFiltersJSON(dp.Spec.Authz.RowFilters, dp.Spec.Trino.CatalogOrDefault())})
 	}
 	if dp.Spec.Authz.HasColumnAccess() {
-		env = append(env, corev1.EnvVar{Name: "TRINO_COLUMN_ACCESS", Value: columnAccessJSON(dp.Spec.Authz.ColumnAccess)})
+		env = append(env, corev1.EnvVar{Name: "TRINO_COLUMN_ACCESS", Value: columnAccessJSON(dp.Spec.Authz.ColumnAccess, dp.Spec.Trino.CatalogOrDefault())})
 	}
 	return env
 }
 
 // rowFiltersJSON renders the filters in the shape rowfilters-configuration.rego
 // expects, with every default resolved so the policy never has to guess.
-func rowFiltersJSON(filters []dataplatformv1alpha1.RowFilterSpec) string {
+func rowFiltersJSON(filters []dataplatformv1alpha1.RowFilterSpec, lakeCatalog string) string {
 	entries := make([]map[string]any, 0, len(filters))
 	for i := range filters {
 		entries = append(entries, map[string]any{
-			"catalog":  filters[i].CatalogOrDefault(),
+			"catalog":  filters[i].CatalogOr(lakeCatalog),
 			"schema":   filters[i].Schema,
 			"table":    filters[i].Table,
 			"column":   filters[i].Column,
@@ -162,18 +162,18 @@ func rowFiltersJSON(filters []dataplatformv1alpha1.RowFilterSpec) string {
 
 // columnAccessJSON renders the restrictions in the shape
 // rowfilters-configuration.rego expects, with every default resolved.
-func columnAccessJSON(access []dataplatformv1alpha1.ColumnAccessSpec) string {
+func columnAccessJSON(access []dataplatformv1alpha1.ColumnAccessSpec, lakeCatalog string) string {
 	entries := make([]map[string]any, 0, len(access))
 	for i := range access {
 		entries = append(entries, map[string]any{
-			"catalog":  access[i].CatalogOrDefault(),
+			"catalog":  access[i].CatalogOr(lakeCatalog),
 			"schema":   access[i].Schema,
 			"table":    access[i].Table,
 			"column":   access[i].Column,
 			"mask":     access[i].MaskOrDefault(),
 			"type":     access[i].OpenFGA.Type,
 			"relation": access[i].OpenFGA.RelationOrDefault(),
-			"object":   access[i].ObjectOrDefault(),
+			"object":   access[i].ObjectOr(lakeCatalog),
 		})
 	}
 	raw, err := json.Marshal(entries)
@@ -243,7 +243,7 @@ func (r *DataLakeReconciler) applyOPADeployment(
 					},
 				},
 				{Name: "LAKEKEEPER_SCOPE", Value: oidc.scope},
-				{Name: "TRINO_LAKEKEEPER_CATALOG_NAME", Value: nameLakekeeper},
+				{Name: "TRINO_LAKEKEEPER_CATALOG_NAME", Value: dp.Spec.Trino.CatalogOrDefault()},
 				{Name: "LAKEKEEPER_LAKEKEEPER_WAREHOUSE", Value: dp.Spec.Lakekeeper.Warehouse.NameOrDefault()},
 				{Name: "TRINO_ALLOW_UNMANAGED_CATALOGS", Value: "true"},
 			}, opaAccessEnv(dp, fga)...),

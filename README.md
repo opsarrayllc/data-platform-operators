@@ -188,6 +188,23 @@ can read them. A token with none of those groups cannot sign in.
 
 Keycloak is for local development. To sign people in through JumpCloud, Okta, or another provider, and to run machine-to-LakeKeeper calls on Kubernetes ServiceAccount tokens, see [`docs/jumpcloud.md`](docs/jumpcloud.md).
 
+## Trino catalog name
+
+Trino reaches the managed warehouse through one catalog, `lakekeeper` by
+default, so tables are `lakekeeper.<namespace>.<table>`. Set
+`spec.trino.catalog` to name it after your organization instead:
+
+```yaml
+spec:
+  trino:
+    catalog: keyme
+```
+
+Renaming it changes every fully qualified table name: saved queries, BI
+datasets, and the default column objects of `spec.authz.columnAccess`.
+`dev`, `prod`, `demo`, and `system` are rejected; the OPA bridge presets the
+first three, and Trino reserves `system`.
+
 ## Change data capture (Debezium)
 
 `spec.debezium.sources` streams changes from MySQL, MariaDB, PostgreSQL, or SQL
@@ -246,7 +263,8 @@ curl -sS "$OPENFGA/stores/$STORE/write" \
       ]}}'
 ```
 
-The default column object is `{catalog}.{schema}.{table}.{column}`. Set
+The default column object is `{catalog}.{schema}.{table}.{column}`, where
+`{catalog}` is `spec.trino.catalog` (default `lakekeeper`). Set
 `openfga.object` to a short name such as `ssn` to share one grant across
 tables. Tuple users are Trino usernames (the OIDC `sub` claim). A relation may be
 granted to a user directly or to a group's members; the operator writes

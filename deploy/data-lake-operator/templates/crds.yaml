@@ -373,8 +373,9 @@ spec:
                       properties:
                         catalog:
                           description: |-
-                            catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
-                            the catalog the operator creates for the managed warehouse.
+                            catalog is the Trino catalog holding the table. Defaults to
+                            spec.trino.catalog, the catalog the operator creates for the managed
+                            warehouse.
                           type: string
                         column:
                           description: |-
@@ -608,8 +609,9 @@ spec:
                       properties:
                         catalog:
                           description: |-
-                            catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
-                            the catalog the operator creates for the managed warehouse.
+                            catalog is the Trino catalog holding the table. Defaults to
+                            spec.trino.catalog, the catalog the operator creates for the managed
+                            warehouse.
                           type: string
                         column:
                           description: |-
@@ -1562,6 +1564,15 @@ spec:
               trino:
                 description: trino configures the query engine.
                 properties:
+                  catalog:
+                    description: |-
+                      catalog is the Trino catalog name for the managed LakeKeeper warehouse,
+                      so tables are queried as <catalog>.<namespace>.<table>. Defaults to
+                      "lakekeeper". Renaming it changes every fully qualified table name, and
+                      the default OpenFGA object ids of spec.authz.columnAccess entries.
+                    maxLength: 63
+                    pattern: ^[a-z][a-z0-9_]*$
+                    type: string
                   coordinator:
                     description: coordinator configures the Trino coordinator.
                     properties:
@@ -1633,7 +1644,7 @@ spec:
                     additionalProperties:
                       type: string
                     description: extraCatalogs adds extra files under etc/catalog.
-                      The "lakekeeper" catalog is reserved.
+                      The name in catalog is reserved.
                     type: object
                   extraConfig:
                     additionalProperties:
@@ -1886,6 +1897,11 @@ spec:
                     minimum: 0
                     type: integer
                 type: object
+                x-kubernetes-validations:
+                - message: 'catalog must not be dev, prod, demo, or system: the OPA
+                    bridge presets the first three, and Trino reserves system'
+                  rule: '!has(self.catalog) || !(self.catalog in [''dev'', ''prod'',
+                    ''demo'', ''system''])'
             type: object
           status:
             description: status defines the observed state of DataLake

@@ -40,7 +40,7 @@ func TestRowFiltersJSONResolvesDefaults(t *testing.T) {
 	}
 
 	var parsed []map[string]any
-	if err := json.Unmarshal([]byte(rowFiltersJSON(filters)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(rowFiltersJSON(filters, dataplatformv1alpha1.DefaultTrinoCatalog)), &parsed); err != nil {
 		t.Fatalf("row filters are not valid JSON: %v", err)
 	}
 	if len(parsed) != 2 {
@@ -112,22 +112,23 @@ func TestColumnAccessJSONResolvesDefaults(t *testing.T) {
 	}
 
 	var parsed []map[string]any
-	if err := json.Unmarshal([]byte(columnAccessJSON(access)), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(columnAccessJSON(access, "keyme")), &parsed); err != nil {
 		t.Fatalf("column access is not valid JSON: %v", err)
 	}
 	if len(parsed) != 2 {
 		t.Fatalf("got %d entries, want 2", len(parsed))
 	}
 
+	// Unset catalogs follow spec.trino.catalog, here "keyme".
 	want := map[string]any{
-		"catalog":  dataplatformv1alpha1.DefaultTrinoCatalog,
+		"catalog":  "keyme",
 		"schema":   "sales",
 		"table":    "orders",
 		"column":   "ssn",
 		"mask":     dataplatformv1alpha1.DefaultColumnMask,
 		"type":     "column",
 		"relation": dataplatformv1alpha1.DefaultRowFilterRelation,
-		"object":   "lakekeeper.sales.orders.ssn",
+		"object":   "keyme.sales.orders.ssn",
 	}
 	if !reflect.DeepEqual(parsed[0], want) {
 		t.Errorf("defaulted access = %v, want %v", parsed[0], want)
