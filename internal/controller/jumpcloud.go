@@ -43,6 +43,8 @@ const (
 
 	// catalogUserTypeHuman is LakeKeeper's user-type for people.
 	catalogUserTypeHuman = "human"
+	// catalogUserTypeApplication is LakeKeeper's user-type for machine clients.
+	catalogUserTypeApplication = "application"
 )
 
 // jumpCloudClient reads user groups and users from the JumpCloud Directory API.

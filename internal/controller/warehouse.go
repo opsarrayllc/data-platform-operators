@@ -116,7 +116,18 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []Cat
 		principals = append(principals, CatalogPrincipal{
 			Subject:         oidc.trinoPrincipal,
 			Name:            trinoName,
-			Type:            "application",
+			Type:            catalogUserTypeApplication,
+			ProjectRelation: catalogRelationProjectAdmin,
+		})
+	}
+	// Debezium Server creates and commits to the tables it replicates into.
+	// project_admin is broader than it needs; narrow it once grants can target
+	// a warehouse or namespace.
+	if oidc.debeziumPrincipal != "" {
+		principals = append(principals, CatalogPrincipal{
+			Subject:         oidc.debeziumPrincipal,
+			Name:            oidc.debeziumClientID,
+			Type:            catalogUserTypeApplication,
 			ProjectRelation: catalogRelationProjectAdmin,
 		})
 	}
@@ -126,7 +137,7 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []Cat
 		principals = append(principals, CatalogPrincipal{
 			Subject:         oidc.opaPrincipal,
 			Name:            opaName,
-			Type:            "application",
+			Type:            catalogUserTypeApplication,
 			ProjectRelation: catalogRelationSecurityAdmin,
 		})
 	}
