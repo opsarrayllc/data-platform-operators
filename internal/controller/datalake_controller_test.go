@@ -162,6 +162,7 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"opa"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"argo"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"debezium"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"platform-admins"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"data-engineers"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"name":"analysts"`))
@@ -263,6 +264,7 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(catalog.grants).To(ContainElement("oidc~" + dataplatformv1alpha1.DefaultOIDCAdminUserID + "=admin/project_admin"))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/project_admin")))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/security_admin")))
+		Expect(catalog.grants).To(ContainElement(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID) + "=/project_admin"))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupPlatformAdmins))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupDataEngineers))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupAnalysts))
@@ -406,6 +408,7 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapKeycloakRealm, Namespace: nameKeycloak}, realmCM)).To(Succeed())
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"superset"`))
 		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"argo"`))
+		Expect(realmCM.Data[keyRealmJSON]).To(ContainSubstring(`"clientId":"debezium"`))
 
 		cfg := &corev1.Secret{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, cfg)).To(Succeed())
@@ -600,6 +603,8 @@ var _ = Describe("DataLake Controller", func() {
 		By("granting the ServiceAccount principals")
 		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:trino:trino=/project_admin"))
 		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:openfga:opa=/security_admin"))
+		// Debezium keeps its Keycloak client when Trino and OPA switch to ServiceAccounts.
+		Expect(catalog.grants).To(ContainElement(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID) + "=/project_admin"))
 	})
 
 	It("rejects static keys and a system identity together", func() {

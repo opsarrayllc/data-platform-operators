@@ -123,30 +123,36 @@ func (r *DataLakeReconciler) embeddedOIDCConfig(ctx context.Context, dp *datapla
 	if err != nil {
 		return oidcConfig{}, err
 	}
+	debeziumID, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCDebeziumClientID)
+	if err != nil {
+		return oidcConfig{}, err
+	}
 
 	return oidcConfig{
-		enabled:          true,
-		issuer:           issuer,
-		publicIssuer:     publicIssuer,
-		audience:         dataplatformv1alpha1.DefaultOIDCAudience,
-		scope:            dataplatformv1alpha1.DefaultOIDCScope,
-		uiClientID:       uiID,
-		trinoClientID:    trinoID,
-		trinoSecret:      trinoSecret,
-		opaClientID:      opaID,
-		opaSecret:        opaSecret,
-		operatorClientID: operatorID,
-		operatorSecret:   operatorSecret,
-		adminSubject:     dataplatformv1alpha1.DefaultOIDCAdminUserID,
-		adminName:        dataplatformv1alpha1.DefaultOIDCAdminUser,
-		adminEmail:       keycloakAdminEmail,
-		opaPrincipal:     oidcSubjectPrefix + keycloakUUID("service-account", opaID),
-		trinoPrincipal:   oidcSubjectPrefix + keycloakUUID("service-account", trinoID),
-		tokenURL:         oidcTokenURL(issuer),
-		proxyNamespace:   ns,
-		proxyService:     nameKeycloak,
-		proxyPort:        keycloakPort,
-		proxyTokenPath:   oidcTokenPath(realm),
+		enabled:           true,
+		issuer:            issuer,
+		publicIssuer:      publicIssuer,
+		audience:          dataplatformv1alpha1.DefaultOIDCAudience,
+		scope:             dataplatformv1alpha1.DefaultOIDCScope,
+		uiClientID:        uiID,
+		trinoClientID:     trinoID,
+		trinoSecret:       trinoSecret,
+		opaClientID:       opaID,
+		opaSecret:         opaSecret,
+		operatorClientID:  operatorID,
+		operatorSecret:    operatorSecret,
+		adminSubject:      dataplatformv1alpha1.DefaultOIDCAdminUserID,
+		adminName:         dataplatformv1alpha1.DefaultOIDCAdminUser,
+		adminEmail:        keycloakAdminEmail,
+		opaPrincipal:      oidcSubjectPrefix + keycloakUUID("service-account", opaID),
+		trinoPrincipal:    oidcSubjectPrefix + keycloakUUID("service-account", trinoID),
+		debeziumClientID:  debeziumID,
+		debeziumPrincipal: oidcSubjectPrefix + keycloakUUID("service-account", debeziumID),
+		tokenURL:          oidcTokenURL(issuer),
+		proxyNamespace:    ns,
+		proxyService:      nameKeycloak,
+		proxyPort:         keycloakPort,
+		proxyTokenPath:    oidcTokenPath(realm),
 	}, nil
 }
 
@@ -251,6 +257,10 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 		if genErr != nil {
 			return genErr
 		}
+		debeziumSecret, genErr := randomHex(16)
+		if genErr != nil {
+			return genErr
+		}
 		return r.ensureGeneratedSecret(ctx, dp, secretOIDC, ns, componentKeycloak, map[string][]byte{
 			keyOIDCClientID:             []byte(dataplatformv1alpha1.DefaultOIDCClientID),
 			keyOIDCTrinoClientID:        []byte(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
@@ -263,6 +273,8 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 			keyOIDCSupersetClientSecret: []byte(supersetSecret),
 			keyOIDCArgoClientID:         []byte(dataplatformv1alpha1.DefaultOIDCArgoClientID),
 			keyOIDCArgoClientSecret:     []byte(argoSecret),
+			keyOIDCDebeziumClientID:     []byte(dataplatformv1alpha1.DefaultOIDCDebeziumClientID),
+			keyOIDCDebeziumClientSecret: []byte(debeziumSecret),
 		})
 	}
 	if err != nil {
@@ -312,6 +324,18 @@ func (r *DataLakeReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc *cor
 		oidc.Data[keyOIDCArgoClientSecret] = []byte(secret)
 		changed = true
 	}
+	if _, ok := oidc.Data[keyOIDCDebeziumClientID]; !ok {
+		oidc.Data[keyOIDCDebeziumClientID] = []byte(dataplatformv1alpha1.DefaultOIDCDebeziumClientID)
+		changed = true
+	}
+	if _, ok := oidc.Data[keyOIDCDebeziumClientSecret]; !ok {
+		secret, err := randomHex(16)
+		if err != nil {
+			return err
+		}
+		oidc.Data[keyOIDCDebeziumClientSecret] = []byte(secret)
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -348,6 +372,10 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 	if err != nil {
 		return "", err
 	}
+	debeziumSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCDebeziumClientSecret)
+	if err != nil {
+		return "", err
+	}
 	signingKey, err := r.getSecretData(ctx, secretKeycloakRealmKey, ns, keyRealmPrivateKey)
 	if err != nil {
 		return "", err
@@ -364,6 +392,7 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 		opaSecret:           opaSecret,
 		supersetSecret:      supersetSecret,
 		argoSecret:          argoSecret,
+		debeziumSecret:      debeziumSecret,
 		signingKey:          signingKey,
 		signingCertificate:  signingCert,
 		lakekeeperNamespace: dp.Spec.Lakekeeper.NamespaceOrDefault(),
@@ -511,6 +540,7 @@ type realmOptions struct {
 	opaSecret           string
 	supersetSecret      string
 	argoSecret          string
+	debeziumSecret      string
 	signingKey          string
 	signingCertificate  string
 	lakekeeperNamespace string
@@ -591,6 +621,9 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOpaClientID, "OPA", opaSecret, nil),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCSupersetClientID, "Superset", supersetSecret, supersetRedirects),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCArgoClientID, "Argo", argoSecret, argoRedirects),
+			// Debezium Server writes change streams through the Iceberg REST
+			// catalog with client credentials only, so it has no redirects.
+			confidentialClient(dataplatformv1alpha1.DefaultOIDCDebeziumClientID, "Debezium", opts.debeziumSecret, nil),
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOperatorClient, "Data Platform Operator", operatorSecret, nil),
 		},
 		"users": []map[string]any{
@@ -613,6 +646,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOpaClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCSupersetClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCArgoClientID),
+			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCDebeziumClientID),
 			serviceAccountUser(dataplatformv1alpha1.DefaultOIDCOperatorClient),
 		},
 	}
