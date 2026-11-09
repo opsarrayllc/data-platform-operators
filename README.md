@@ -76,11 +76,27 @@ The operator image tags come from the ref that triggered the build:
 
 The Superset image is tagged with its Superset version (`5.0.0`), which is the tag the analytics operator uses by default. Pull requests are built as a check but never pushed.
 
-To cut a release of the operator images and charts:
+Releases are cut automatically. When Tests pass on `main`, the Release workflow
+(`.github/workflows/release.yml`) tags the commit with the next `v*` version,
+creates a GitHub release, and dispatches the image and chart workflows on that
+tag. `hack/operator-release.sh` picks the version from the conventional commits
+since the last tag that touched operator sources:
+
+| Commits since the last `v*` tag | Bump |
+| --- | --- |
+| `feat!:` or a `BREAKING CHANGE` footer | major (minor while the version is `0.x`) |
+| `feat:` | minor |
+| anything else | patch |
+| only docs, Markdown, Terraform, CI, or e2e tests | no release |
+
+To force a bump, or to go to `1.0.0`, run the Release workflow by hand from
+`main` and pick `patch`, `minor`, or `major`:
 
 ```bash
-git tag v0.1.0 && git push origin v0.1.0
+gh workflow run release.yml --ref main -f bump=minor
 ```
+
+Pushing a `v*` tag yourself still publishes it as before.
 
 ## Installing with Helm
 
