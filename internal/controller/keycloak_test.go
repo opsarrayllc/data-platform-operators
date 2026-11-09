@@ -1,8 +1,13 @@
 package controller
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
 )
@@ -23,6 +28,7 @@ func TestRealmPinsSigningKey(t *testing.T) {
 		opaSecret:           "opasecret",
 		supersetSecret:      "supersetsecret",
 		argoSecret:          "argosecret",
+		debeziumSecret:      "debeziumsecret",
 		signingKey:          key,
 		signingCertificate:  cert,
 		lakekeeperNamespace: "lakekeeper",
@@ -104,6 +110,7 @@ func TestRealmAccessGroups(t *testing.T) {
 		opaSecret:           "opasecret",
 		supersetSecret:      "supersetsecret",
 		argoSecret:          "argosecret",
+		debeziumSecret:      "debeziumsecret",
 		signingKey:          key,
 		signingCertificate:  cert,
 		lakekeeperNamespace: "lakekeeper",
@@ -200,5 +207,28 @@ func TestRealmAccessGroups(t *testing.T) {
 	}
 	if !foundOfflineAccess {
 		t.Error("realm is missing offline_access client scope")
+	}
+}
+
+// TestOIDCSecretKeysBackfillDebezium guards upgrades: clusters whose oidc
+// Secret predates the Debezium client get its id and a generated secret.
+func TestOIDCSecretKeysBackfillDebezium(t *testing.T) {
+	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretOIDC, Namespace: "keycloak"}, Data: map[string][]byte{
+		keyOIDCOpaClientID:          []byte("opa"),
+		keyOIDCOpaClientSecret:      []byte("x"),
+		keyOIDCSupersetClientID:     []byte("superset"),
+		keyOIDCSupersetClientSecret: []byte("x"),
+		keyOIDCArgoClientID:         []byte("argo"),
+		keyOIDCArgoClientSecret:     []byte("x"),
+	}}
+	r := &DataLakeReconciler{Client: fake.NewClientBuilder().WithObjects(s.DeepCopy()).Build()}
+	if err := r.ensureOIDCSecretKeys(context.Background(), s); err != nil {
+		t.Fatalf("ensureOIDCSecretKeys: %v", err)
+	}
+	if got := string(s.Data[keyOIDCDebeziumClientID]); got != dataplatformv1alpha1.DefaultOIDCDebeziumClientID {
+		t.Fatalf("debezium client id = %q", got)
+	}
+	if len(s.Data[keyOIDCDebeziumClientSecret]) != 32 {
+		t.Fatalf("debezium client secret = %q, want 32 hex characters", s.Data[keyOIDCDebeziumClientSecret])
 	}
 }

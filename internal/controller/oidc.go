@@ -54,6 +54,11 @@ type oidcConfig struct {
 	// trinoPrincipal is the LakeKeeper user id of Trino's Iceberg REST
 	// connector, which needs project access to resolve warehouses.
 	trinoPrincipal string
+	// debeziumClientID and debeziumPrincipal identify the client Debezium
+	// Server uses to write change streams into the catalog. Only the embedded
+	// realm provisions it, so both are empty for external issuers.
+	debeziumClientID  string
+	debeziumPrincipal string
 	// serviceAccounts replaces the machine OIDC clients with Kubernetes
 	// ServiceAccount tokens (spec.auth.serviceAccountTokens).
 	serviceAccounts serviceAccountTokens

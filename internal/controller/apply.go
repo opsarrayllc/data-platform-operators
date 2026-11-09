@@ -113,6 +113,8 @@ const (
 	keyOIDCSupersetClientSecret  = "supersetClientSecret"
 	keyOIDCArgoClientID          = "argoClientID"
 	keyOIDCArgoClientSecret      = "argoClientSecret"
+	keyOIDCDebeziumClientID      = "debeziumClientID"
+	keyOIDCDebeziumClientSecret  = "debeziumClientSecret"
 	keyKeycloakAdminUser         = "username"
 	keyKeycloakAdminPassword     = "password"
 	keyTrinoSharedSecret         = "sharedSecret"
