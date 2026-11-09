@@ -116,6 +116,11 @@ func (s *TrinoSpec) ImageOrDefault() string {
 	return stringOrDefault(s.Image, DefaultTrinoImage)
 }
 
+// CatalogOrDefault returns the Trino catalog name for the managed warehouse.
+func (s *TrinoSpec) CatalogOrDefault() string {
+	return stringOrDefault(s.Catalog, DefaultTrinoCatalog)
+}
+
 // WorkersOrDefault returns the Trino worker count.
 func (s *TrinoSpec) WorkersOrDefault() int32 {
 	return int32OrDefault(s.Workers, 0)
@@ -259,9 +264,10 @@ func (s *AuthzSpec) HasAccessPolicies() bool {
 	return s.HasRowFilters() || s.HasColumnAccess()
 }
 
-// CatalogOrDefault returns the Trino catalog the filtered table lives in.
-func (s *RowFilterSpec) CatalogOrDefault() string {
-	return stringOrDefault(s.Catalog, DefaultTrinoCatalog)
+// CatalogOr returns the Trino catalog the filtered table lives in, or the
+// lake's catalog when unset.
+func (s *RowFilterSpec) CatalogOr(lakeCatalog string) string {
+	return stringOrDefault(s.Catalog, lakeCatalog)
 }
 
 // IsNumeric reports whether the column is compared against unquoted literals.
@@ -274,9 +280,10 @@ func (s *RowFilterSubjectSpec) RelationOrDefault() string {
 	return stringOrDefault(s.Relation, DefaultRowFilterRelation)
 }
 
-// CatalogOrDefault returns the Trino catalog the restricted column lives in.
-func (s *ColumnAccessSpec) CatalogOrDefault() string {
-	return stringOrDefault(s.Catalog, DefaultTrinoCatalog)
+// CatalogOr returns the Trino catalog the restricted column lives in, or the
+// lake's catalog when unset.
+func (s *ColumnAccessSpec) CatalogOr(lakeCatalog string) string {
+	return stringOrDefault(s.Catalog, lakeCatalog)
 }
 
 // MaskOrDefault returns the SQL expression applied when the user has no grant.
@@ -289,12 +296,12 @@ func (s *ColumnAccessSubjectSpec) RelationOrDefault() string {
 	return stringOrDefault(s.Relation, DefaultRowFilterRelation)
 }
 
-// ObjectOrDefault returns the OpenFGA object id for this column.
-func (s *ColumnAccessSpec) ObjectOrDefault() string {
+// ObjectOr returns the OpenFGA object id for this column.
+func (s *ColumnAccessSpec) ObjectOr(lakeCatalog string) string {
 	if s.OpenFGA.Object != "" {
 		return s.OpenFGA.Object
 	}
-	return s.CatalogOrDefault() + "." + s.Schema + "." + s.Table + "." + s.Column
+	return s.CatalogOr(lakeCatalog) + "." + s.Schema + "." + s.Table + "." + s.Column
 }
 
 // AudienceOrDefault returns the expected JWT audience.

@@ -574,8 +574,9 @@ type AuthzSpec struct {
 
 // ColumnAccessSpec hides one Trino column from users who lack an OpenFGA grant.
 type ColumnAccessSpec struct {
-	// catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
-	// the catalog the operator creates for the managed warehouse.
+	// catalog is the Trino catalog holding the table. Defaults to
+	// spec.trino.catalog, the catalog the operator creates for the managed
+	// warehouse.
 	// +optional
 	Catalog string `json:"catalog,omitempty"`
 
@@ -633,8 +634,9 @@ type ColumnAccessSubjectSpec struct {
 
 // RowFilterSpec restricts one Trino table to the rows a user is allowed to see.
 type RowFilterSpec struct {
-	// catalog is the Trino catalog holding the table. Defaults to "lakekeeper",
-	// the catalog the operator creates for the managed warehouse.
+	// catalog is the Trino catalog holding the table. Defaults to
+	// spec.trino.catalog, the catalog the operator creates for the managed
+	// warehouse.
 	// +optional
 	Catalog string `json:"catalog,omitempty"`
 
@@ -966,6 +968,7 @@ type WarehouseSpec struct {
 }
 
 // TrinoSpec configures the query engine.
+// +kubebuilder:validation:XValidation:rule="!has(self.catalog) || !(self.catalog in ['dev', 'prod', 'demo', 'system'])",message="catalog must not be dev, prod, demo, or system: the OPA bridge presets the first three, and Trino reserves system"
 type TrinoSpec struct {
 	// enabled deploys Trino. Defaults to true.
 	// +optional
@@ -980,6 +983,15 @@ type TrinoSpec struct {
 	// +optional
 	Image string `json:"image,omitempty"`
 
+	// catalog is the Trino catalog name for the managed LakeKeeper warehouse,
+	// so tables are queried as <catalog>.<namespace>.<table>. Defaults to
+	// "lakekeeper". Renaming it changes every fully qualified table name, and
+	// the default OpenFGA object ids of spec.authz.columnAccess entries.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[a-z][a-z0-9_]*$`
+	// +kubebuilder:validation:MaxLength=63
+	Catalog string `json:"catalog,omitempty"`
+
 	// workers is the number of Trino worker pods. Zero runs a coordinator-only cluster.
 	// +optional
 	// +kubebuilder:validation:Minimum=0
@@ -993,7 +1005,7 @@ type TrinoSpec struct {
 	// +optional
 	ExtraConfig map[string]string `json:"extraConfig,omitempty"`
 
-	// extraCatalogs adds extra files under etc/catalog. The "lakekeeper" catalog is reserved.
+	// extraCatalogs adds extra files under etc/catalog. The name in catalog is reserved.
 	// +optional
 	ExtraCatalogs map[string]string `json:"extraCatalogs,omitempty"`
 

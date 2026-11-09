@@ -361,7 +361,7 @@ func debeziumProperties(
 		"debezium.transforms.unwrap.delete.tombstone.handling.mode": "rewrite",
 		"debezium.transforms.unwrap.drop.tombstones":                strconv.FormatBool(true),
 		"debezium.sink.type":                                        "iceberg",
-		"debezium.sink.iceberg.catalog-name":                        dataplatformv1alpha1.DefaultTrinoCatalog,
+		"debezium.sink.iceberg.catalog-name":                        dp.Spec.Trino.CatalogOrDefault(),
 		"debezium.sink.iceberg.type":                                "rest",
 		"debezium.sink.iceberg.uri":                                 lkURL,
 		"debezium.sink.iceberg.warehouse":                           dp.Spec.Lakekeeper.Warehouse.NameOrDefault(),

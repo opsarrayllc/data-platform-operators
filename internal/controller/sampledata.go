@@ -65,7 +65,7 @@ func (r *DataLakeReconciler) reconcileSampleData(
 
 	ns := dp.Spec.Trino.NamespaceOrDefault()
 	schema := dp.Spec.SampleData.SchemaOrDefault()
-	catalog := dataplatformv1alpha1.DefaultTrinoCatalog
+	catalog := dp.Spec.Trino.CatalogOrDefault()
 	sql := sampleDataSQL(catalog, schema)
 	script := sampleDataSeedScript()
 	cmHash := hashData(sql, script)
