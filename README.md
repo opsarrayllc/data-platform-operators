@@ -172,6 +172,13 @@ can read them. A token with none of those groups cannot sign in.
 
 Keycloak is for local development. To sign people in through JumpCloud, Okta, or another provider, and to run machine-to-LakeKeeper calls on Kubernetes ServiceAccount tokens, see [`docs/jumpcloud.md`](docs/jumpcloud.md).
 
+## Change data capture (Debezium)
+
+`spec.debezium.sources` streams changes from MySQL, MariaDB, PostgreSQL, or SQL
+Server into Iceberg tables in the warehouse. Each source runs Debezium Server
+with the Iceberg sink, writing through LakeKeeper as its own principal. See
+[`docs/debezium.md`](docs/debezium.md) for the source database setup.
+
 ## Row-level access control
 
 LakeKeeper and OpenFGA authorize whole objects: a warehouse, a namespace, a

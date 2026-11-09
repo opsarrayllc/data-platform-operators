@@ -662,6 +662,376 @@ spec:
                     type: array
                     x-kubernetes-list-type: atomic
                 type: object
+              debezium:
+                description: |-
+                  debezium streams changes from operational databases into the warehouse
+                  with Debezium Server and its Iceberg sink. Each source runs as its own
+                  single-replica Deployment that writes through the LakeKeeper REST catalog.
+                  Requires LakeKeeper.
+                properties:
+                  image:
+                    description: image is the Debezium Server image. It must bundle
+                      the Iceberg sink.
+                    type: string
+                  namespace:
+                    description: |-
+                      namespace is the Kubernetes namespace for Debezium Server. Defaults to
+                      "debezium". Use a unique value if you create multiple DataLakes.
+                    type: string
+                  sources:
+                    description: |-
+                      sources are the databases to capture. Removing a source deletes its
+                      Deployment, but not its replication slot, publication, or tables.
+                    items:
+                      description: DebeziumSourceSpec is one database captured by
+                        its own Debezium Server.
+                      properties:
+                        connector:
+                          description: connector is the source database type.
+                          enum:
+                          - mysql
+                          - mariadb
+                          - postgresql
+                          - sqlserver
+                          type: string
+                        credentialsSecretRef:
+                          description: |-
+                            credentialsSecretRef locates the replication user's username and
+                            password. The namespace defaults to the Debezium namespace; Secrets
+                            elsewhere are copied into it.
+                          properties:
+                            name:
+                              description: name of the Secret.
+                              type: string
+                            namespace:
+                              description: namespace of the Secret. Defaults to the
+                                component's namespace.
+                              type: string
+                            passwordKey:
+                              default: password
+                              description: passwordKey is the Secret key for the database
+                                password.
+                              type: string
+                            usernameKey:
+                              default: username
+                              description: usernameKey is the Secret key for the database
+                                user.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        database:
+                          description: |-
+                            database is the database to capture. Required for postgresql and
+                            sqlserver. For mysql and mariadb it limits capture to that database;
+                            leave it empty to capture every database the user can read, or use
+                            tableIncludeList.
+                          type: string
+                        extraEnv:
+                          description: |-
+                            extraEnv is appended to the Debezium Server container. JAVA_OPTS sets
+                            JVM flags such as heap size.
+                          items:
+                            description: EnvVar represents an environment variable
+                              present in a Container.
+                            properties:
+                              name:
+                                description: |-
+                                  Name of the environment variable.
+                                  May consist of any printable ASCII characters except '='.
+                                type: string
+                              value:
+                                description: |-
+                                  Variable references $(VAR_NAME) are expanded
+                                  using the previously defined environment variables in the container and
+                                  any service environment variables. If a variable cannot be resolved,
+                                  the reference in the input string will be unchanged. Double $$ are reduced
+                                  to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                                  "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                                  Escaped references will never be expanded, regardless of whether the variable
+                                  exists or not.
+                                  Defaults to "".
+                                type: string
+                              valueFrom:
+                                description: Source for the environment variable's
+                                  value. Cannot be used if value is not empty.
+                                properties:
+                                  configMapKeyRef:
+                                    description: Selects a key of a ConfigMap.
+                                    properties:
+                                      key:
+                                        description: The key to select.
+                                        type: string
+                                      name:
+                                        default: ""
+                                        description: |-
+                                          Name of the referent.
+                                          This field is effectively required, but due to backwards compatibility is
+                                          allowed to be empty. Instances of this type with an empty value here are
+                                          almost certainly wrong.
+                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                        type: string
+                                      optional:
+                                        description: Specify whether the ConfigMap
+                                          or its key must be defined
+                                        type: boolean
+                                    required:
+                                    - key
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  fieldRef:
+                                    description: |-
+                                      Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                                      spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                                    properties:
+                                      apiVersion:
+                                        description: Version of the schema the FieldPath
+                                          is written in terms of, defaults to "v1".
+                                        type: string
+                                      fieldPath:
+                                        description: Path of the field to select in
+                                          the specified API version.
+                                        type: string
+                                    required:
+                                    - fieldPath
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  fileKeyRef:
+                                    description: |-
+                                      FileKeyRef selects a key of the env file.
+                                      Requires the EnvFiles feature gate to be enabled.
+                                    properties:
+                                      key:
+                                        description: |-
+                                          The key within the env file. An invalid key will prevent the pod from starting.
+                                          The keys defined within a source may consist of any printable ASCII characters except '='.
+                                          During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                                        type: string
+                                      optional:
+                                        default: false
+                                        description: |-
+                                          Specify whether the file or its key must be defined. If the file or key
+                                          does not exist, then the env var is not published.
+                                          If optional is set to true and the specified key does not exist,
+                                          the environment variable will not be set in the Pod's containers.
+
+                                          If optional is set to false and the specified key does not exist,
+                                          an error will be returned during Pod creation.
+                                        type: boolean
+                                      path:
+                                        description: |-
+                                          The path within the volume from which to select the file.
+                                          Must be relative and may not contain the '..' path or start with '..'.
+                                        type: string
+                                      volumeName:
+                                        description: The name of the volume mount
+                                          containing the env file.
+                                        type: string
+                                    required:
+                                    - key
+                                    - path
+                                    - volumeName
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  resourceFieldRef:
+                                    description: |-
+                                      Selects a resource of the container: only resources limits and requests
+                                      (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                                    properties:
+                                      containerName:
+                                        description: 'Container name: required for
+                                          volumes, optional for env vars'
+                                        type: string
+                                      divisor:
+                                        anyOf:
+                                        - type: integer
+                                        - type: string
+                                        description: Specifies the output format of
+                                          the exposed resources, defaults to "1"
+                                        pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                        x-kubernetes-int-or-string: true
+                                      resource:
+                                        description: 'Required: resource to select'
+                                        type: string
+                                    required:
+                                    - resource
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                  secretKeyRef:
+                                    description: Selects a key of a secret in the
+                                      pod's namespace
+                                    properties:
+                                      key:
+                                        description: The key of the secret to select
+                                          from.  Must be a valid secret key.
+                                        type: string
+                                      name:
+                                        default: ""
+                                        description: |-
+                                          Name of the referent.
+                                          This field is effectively required, but due to backwards compatibility is
+                                          allowed to be empty. Instances of this type with an empty value here are
+                                          almost certainly wrong.
+                                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                        type: string
+                                      optional:
+                                        description: Specify whether the Secret or
+                                          its key must be defined
+                                        type: boolean
+                                    required:
+                                    - key
+                                    type: object
+                                    x-kubernetes-map-type: atomic
+                                type: object
+                            required:
+                            - name
+                            type: object
+                          type: array
+                        extraProperties:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            extraProperties are added to Debezium Server's application.properties
+                            last, so they override operator-generated keys. Use full keys, such as
+                            "debezium.source.database.ssl.mode".
+                          type: object
+                        host:
+                          description: host is the database hostname.
+                          minLength: 1
+                          type: string
+                        icebergNamespace:
+                          description: |-
+                            icebergNamespace is the LakeKeeper namespace (Trino schema) tables are
+                            written to, created if missing. Dots create nested namespaces. Defaults
+                            to the source name with "-" replaced by "_".
+                          pattern: ^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$
+                          type: string
+                        name:
+                          description: |-
+                            name identifies the source. The Deployment is "debezium-<name>", and the
+                            name (with "-" replaced by "_") is the Debezium topic prefix, which
+                            starts every destination table name. Changing it re-snapshots the source
+                            into new tables.
+                          pattern: ^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$
+                          type: string
+                        port:
+                          description: port defaults to the connector's standard port
+                            (3306, 5432, or 1433).
+                          format: int32
+                          maximum: 65535
+                          minimum: 1
+                          type: integer
+                        resources:
+                          description: resources are compute resource requirements
+                            for the Debezium Server container.
+                          properties:
+                            claims:
+                              description: |-
+                                Claims lists the names of resources, defined in spec.resourceClaims,
+                                that are used by this container.
+
+                                This field depends on the
+                                DynamicResourceAllocation feature gate.
+
+                                This field is immutable. It can only be set for containers.
+                              items:
+                                description: ResourceClaim references one entry in
+                                  PodSpec.ResourceClaims.
+                                properties:
+                                  name:
+                                    description: |-
+                                      Name must match the name of one entry in pod.spec.resourceClaims of
+                                      the Pod where this field is used. It makes that resource available
+                                      inside a container.
+                                    type: string
+                                  request:
+                                    description: |-
+                                      Request is the name chosen for a request in the referenced claim.
+                                      If empty, everything from the claim is made available, otherwise
+                                      only the result of this request.
+                                    type: string
+                                required:
+                                - name
+                                type: object
+                              type: array
+                              x-kubernetes-list-map-keys:
+                              - name
+                              x-kubernetes-list-type: map
+                            limits:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Limits describes the maximum amount of compute resources allowed.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                            requests:
+                              additionalProperties:
+                                anyOf:
+                                - type: integer
+                                - type: string
+                                pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                                x-kubernetes-int-or-string: true
+                              description: |-
+                                Requests describes the minimum amount of compute resources required.
+                                If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                                otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                                More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                              type: object
+                          type: object
+                        serverID:
+                          description: |-
+                            serverID is the MySQL/MariaDB replication client id. It must be unique
+                            among every replica and binlog client of the source cluster. Defaults to
+                            a value derived from the source name, between 5400 and 105399.
+                          format: int64
+                          minimum: 1
+                          type: integer
+                        snapshotMode:
+                          description: |-
+                            snapshotMode is Debezium's snapshot.mode, for example "initial" (the
+                            connector default) or "no_data".
+                          type: string
+                        tableIncludeList:
+                          description: |-
+                            tableIncludeList limits capture to these tables, as Debezium regular
+                            expressions: "<database>.<table>" for mysql and mariadb,
+                            "<schema>.<table>" for postgresql and sqlserver.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                        tablePrefix:
+                          description: tablePrefix is prepended to every destination
+                            table name.
+                          pattern: ^[A-Za-z0-9_]*$
+                          type: string
+                        upsert:
+                          description: |-
+                            upsert keeps one row per primary key, applying updates and deletes.
+                            Deletes are kept as rows with __deleted = true. Tables without a primary
+                            key are always appended. Set false to append every change event.
+                            Defaults to true.
+                          type: boolean
+                      required:
+                      - connector
+                      - credentialsSecretRef
+                      - host
+                      - name
+                      type: object
+                      x-kubernetes-validations:
+                      - message: database is required for postgresql
+                        rule: self.connector != 'postgresql' || has(self.database)
+                      - message: database is required for sqlserver
+                        rule: self.connector != 'sqlserver' || has(self.database)
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                type: object
               lakekeeper:
                 description: lakekeeper configures the Iceberg REST catalog.
                 properties:
@@ -1534,6 +1904,7 @@ spec:
                   - "WarehouseReady": the Iceberg warehouse has been created
                   - "TrinoReady": the Trino coordinator is ready
                   - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
+                  - "DebeziumReady": every Debezium Server source is running, or none are configured
 
                   The status of each condition is one of True, False, or Unknown.
                 items:

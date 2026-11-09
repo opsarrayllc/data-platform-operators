@@ -122,11 +122,16 @@ func catalogPrincipals(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) []Cat
 	}
 	// Debezium Server creates and commits to the tables it replicates into.
 	// project_admin is broader than it needs; narrow it once grants can target
-	// a warehouse or namespace.
-	if oidc.debeziumPrincipal != "" {
+	// a warehouse or namespace. It is only granted once a source exists, and
+	// is not revoked when the last source is removed.
+	if dp.Spec.Debezium.IsEnabled() && oidc.debeziumPrincipal != "" {
+		debeziumName := oidc.debeziumClientID
+		if oidc.serviceAccounts.enabled {
+			debeziumName = nameDebezium
+		}
 		principals = append(principals, CatalogPrincipal{
 			Subject:         oidc.debeziumPrincipal,
-			Name:            oidc.debeziumClientID,
+			Name:            debeziumName,
 			Type:            catalogUserTypeApplication,
 			ProjectRelation: catalogRelationProjectAdmin,
 		})
