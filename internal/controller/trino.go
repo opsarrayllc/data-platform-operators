@@ -167,7 +167,7 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 		issuer = oidc.publicIssuer
 	}
 	props := map[string]string{
-		"http-server.authentication.type":                        "oauth2",
+		"http-server.authentication.type":                        authTypeOAuth2,
 		"http-server.authentication.allow-insecure-over-http":    "true",
 		"http-server.authentication.oauth2.issuer":               issuer,
 		"http-server.authentication.oauth2.client-id":            oidc.trinoClientID,
@@ -177,7 +177,7 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 		"http-server.authentication.oauth2.additional-audiences": oidc.audience,
 	}
 	if enableWebUI {
-		props["web-ui.authentication.type"] = "oauth2"
+		props["web-ui.authentication.type"] = authTypeOAuth2
 	}
 	if oidc.proxyService != "" && oidc.publicIssuer != "" && oidc.publicIssuer != oidc.issuer {
 		props["http-server.authentication.oauth2.oidc.discovery"] = "false"

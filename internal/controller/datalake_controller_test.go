@@ -32,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/utils/ptr"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
@@ -264,7 +265,9 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(catalog.grants).To(ContainElement("oidc~" + dataplatformv1alpha1.DefaultOIDCAdminUserID + "=admin/project_admin"))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/project_admin")))
 		Expect(catalog.grants).To(ContainElement(HaveSuffix("=/security_admin")))
-		Expect(catalog.grants).To(ContainElement(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID) + "=/project_admin"))
+		// The realm always has the Debezium client, but it is only granted
+		// catalog access once spec.debezium has a source.
+		Expect(catalog.grants).NotTo(ContainElement(HavePrefix(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID))))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupPlatformAdmins))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupDataEngineers))
 		Expect(catalog.accessRoles).To(ContainElement(dataplatformv1alpha1.DefaultGroupAnalysts))
@@ -603,8 +606,148 @@ var _ = Describe("DataLake Controller", func() {
 		By("granting the ServiceAccount principals")
 		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:trino:trino=/project_admin"))
 		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:openfga:opa=/security_admin"))
-		// Debezium keeps its Keycloak client when Trino and OPA switch to ServiceAccounts.
-		Expect(catalog.grants).To(ContainElement(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID) + "=/project_admin"))
+		// No sources, so no Debezium grant under either identity.
+		Expect(catalog.grants).NotTo(ContainElement(ContainSubstring("debezium")))
+	})
+
+	It("deploys Debezium sources that authenticate with a ServiceAccount token", func() {
+		resource := &dataplatformv1alpha1.DataLake{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+		Expect(k8sClient.Delete(ctx, resource)).To(Succeed())
+		Eventually(func() bool {
+			return errors.IsNotFound(k8sClient.Get(ctx, typeNamespacedName, resource))
+		}).Should(BeTrue())
+
+		By("creating the source login in another namespace")
+		credsNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "debezium-source-creds"}}
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, credsNS))).To(Succeed())
+		Expect(client.IgnoreAlreadyExists(k8sClient.Create(ctx, &corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{Name: "orders-db", Namespace: credsNS.Name},
+			Data:       map[string][]byte{"user": []byte("replicator"), "pass": []byte("s3cret")},
+		}))).To(Succeed())
+
+		catalog.grants = nil
+		withDebezium := &dataplatformv1alpha1.DataLake{
+			ObjectMeta: metav1.ObjectMeta{Name: resourceName},
+			Spec: dataplatformv1alpha1.DataLakeSpec{
+				Auth: dataplatformv1alpha1.AuthSpec{
+					ServiceAccountTokens: &dataplatformv1alpha1.ServiceAccountTokensSpec{},
+				},
+				Debezium: dataplatformv1alpha1.DebeziumSpec{
+					Sources: []dataplatformv1alpha1.DebeziumSourceSpec{{
+						Name:      "orders-db",
+						Connector: dataplatformv1alpha1.DebeziumConnectorMySQL,
+						Host:      "orders.example.internal",
+						Database:  "orders",
+						CredentialsSecretRef: dataplatformv1alpha1.PostgresCredentialsSecretRef{
+							Name:        "orders-db",
+							Namespace:   credsNS.Name,
+							UsernameKey: "user",
+							PasswordKey: "pass",
+						},
+					}},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, withDebezium)).To(Succeed())
+
+		_, err := reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		bringUpOpenFGA(ctx, reconciler, typeNamespacedName)
+		markDeploymentReady(ctx, nameLakekeeper, nameLakekeeper)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+
+		By("granting the debezium ServiceAccount")
+		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:debezium:debezium=/project_admin"))
+		Expect(catalog.grants).NotTo(ContainElement(HavePrefix(oidcSubjectPrefix + keycloakUUID("service-account", dataplatformv1alpha1.DefaultOIDCDebeziumClientID))))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: nameDebezium, Namespace: nameDebezium}, &corev1.ServiceAccount{})).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTokenProxy, Namespace: nameDebezium}, &corev1.ConfigMap{})).To(Succeed())
+
+		By("copying the source login next to the pod")
+		creds := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db-credentials", Namespace: nameDebezium}, creds)).To(Succeed())
+		Expect(string(creds.Data[keyPostgresUsername])).To(Equal("replicator"))
+		Expect(string(creds.Data[keyPostgresPassword])).To(Equal("s3cret"))
+
+		By("pointing the Iceberg sink at LakeKeeper through the token sidecar")
+		cfg := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db-config", Namespace: nameDebezium}, cfg)).To(Succeed())
+		props := string(cfg.Data[keyDebeziumConfig])
+		Expect(props).To(ContainSubstring("debezium.source.connector.class=io.debezium.connector.mysql.MySqlConnector\n"))
+		Expect(props).To(ContainSubstring("debezium.source.topic.prefix=orders_db\n"))
+		Expect(props).To(ContainSubstring("debezium.source.database.include.list=orders\n"))
+		Expect(props).To(ContainSubstring("debezium.source.database.password=${DEBEZIUM_SOURCE_DATABASE_PASSWORD}\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.uri=http://lakekeeper.lakekeeper.svc:8181/catalog\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.warehouse=default\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.table-namespace=orders_db\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.oauth2-server-uri=http://127.0.0.1:8099/cgi-bin/token\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.credential=debezium:serviceaccount\n"))
+		// Embedded MinIO has no STS, so the sink gets MinIO's keys, as Trino does.
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.s3.endpoint=http://minio.minio.svc:9000\n"))
+		Expect(props).To(ContainSubstring("debezium.sink.iceberg.s3.access-key-id="))
+		Expect(props).NotTo(ContainSubstring("X-Iceberg-Access-Delegation"))
+		Expect(props).NotTo(ContainSubstring("s3cret"))
+		Expect(props).NotTo(ContainSubstring("debezium.sink.iceberg.scope"))
+
+		deploy := &appsv1.Deployment{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db", Namespace: nameDebezium}, deploy)).To(Succeed())
+		Expect(deploy.Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
+		Expect(deploy.Spec.Selector.MatchLabels).To(HaveKeyWithValue(labelDebeziumSource, "orders-db"))
+		pod := deploy.Spec.Template.Spec
+		Expect(pod.ServiceAccountName).To(Equal(nameDebezium))
+		Expect(pod.Containers).To(HaveLen(2))
+		Expect(pod.Containers[0].Image).To(Equal(dataplatformv1alpha1.DefaultDebeziumImage))
+		Expect(pod.Containers[0].Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("debezium-orders-db-credentials"))
+		Expect(pod.Containers[1].Image).To(Equal(dataplatformv1alpha1.DefaultTokenProxyImage))
+
+		updated := &dataplatformv1alpha1.DataLake{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+		cond := meta.FindStatusCondition(updated.Status.Conditions, dataplatformv1alpha1.ConditionDebeziumReady)
+		Expect(cond.Status).To(Equal(metav1.ConditionFalse))
+		Expect(cond.Message).To(ContainSubstring("orders-db"))
+
+		markDeploymentReady(ctx, "debezium-orders-db", nameDebezium)
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
+		Expect(meta.IsStatusConditionTrue(updated.Status.Conditions, dataplatformv1alpha1.ConditionDebeziumReady)).To(BeTrue())
+
+		By("deleting a removed source's Deployment and Secrets")
+		updated.Spec.Debezium.Sources = nil
+		Expect(k8sClient.Update(ctx, updated)).To(Succeed())
+		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db", Namespace: nameDebezium}, &appsv1.Deployment{}))).To(BeTrue())
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db-config", Namespace: nameDebezium}, &corev1.Secret{}))).To(BeTrue())
+		Expect(errors.IsNotFound(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db-credentials", Namespace: nameDebezium}, &corev1.Secret{}))).To(BeTrue())
+	})
+
+	It("holds Debezium back without a usable identity or warehouse", func() {
+		resource := &dataplatformv1alpha1.DataLake{}
+		Expect(k8sClient.Get(ctx, typeNamespacedName, resource)).To(Succeed())
+		dp := resource.DeepCopy()
+		dp.Spec.Auth.Embedded = ptr.To(false)
+		dp.Spec.Debezium.Sources = []dataplatformv1alpha1.DebeziumSourceSpec{{
+			Name: "orders", Connector: dataplatformv1alpha1.DebeziumConnectorMySQL, Host: "db",
+			CredentialsSecretRef: dataplatformv1alpha1.PostgresCredentialsSecretRef{Name: "orders"},
+		}}
+		dp.Status.Conditions = nil
+		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionTrue, reasonReady, "")
+		progressing, err := reconciler.reconcileDebezium(ctx, dp, objectStore{}, oidcConfig{enabled: true})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(progressing).To(BeTrue())
+		cond := meta.FindStatusCondition(dp.Status.Conditions, dataplatformv1alpha1.ConditionDebeziumReady)
+		Expect(cond.Reason).To(Equal(reasonMissing))
+		Expect(cond.Message).To(ContainSubstring("serviceAccountTokens"))
+
+		By("waiting for the warehouse before deploying anything")
+		dp.Status.Conditions = nil
+		progressing, err = reconciler.reconcileDebezium(ctx, dp, objectStore{}, oidcConfig{})
+		Expect(err).NotTo(HaveOccurred())
+		Expect(progressing).To(BeTrue())
+		cond = meta.FindStatusCondition(dp.Status.Conditions, dataplatformv1alpha1.ConditionDebeziumReady)
+		Expect(cond.Message).To(Equal("Waiting for the warehouse"))
 	})
 
 	It("rejects static keys and a system identity together", func() {

@@ -111,6 +111,7 @@ func useServiceAccountTokens(dp *dataplatformv1alpha1.DataLake, cfg *oidcConfig)
 	cfg.serviceAccounts = sa
 	cfg.trinoPrincipal = kubernetesPrincipal(dp.Spec.Trino.NamespaceOrDefault(), nameTrino)
 	cfg.opaPrincipal = kubernetesPrincipal(dp.Spec.Authz.OpenFGA.NamespaceOrDefault(), nameOPA)
+	cfg.debeziumPrincipal = kubernetesPrincipal(dp.Spec.Debezium.NamespaceOrDefault(), nameDebezium)
 }
 
 // machineTokenURL is where Trino's Iceberg catalog and OPA fetch tokens.

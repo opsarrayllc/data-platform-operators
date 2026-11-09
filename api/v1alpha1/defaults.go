@@ -387,3 +387,51 @@ func (s *JumpCloudGroupSyncSpec) GroupNameFor(role string) string {
 func (s *JumpCloudAPIKeySecretRef) KeyOrDefault() string {
 	return stringOrDefault(s.Key, "apiKey")
 }
+
+// Debezium source connectors.
+const (
+	DebeziumConnectorMySQL      = "mysql"
+	DebeziumConnectorMariaDB    = "mariadb"
+	DebeziumConnectorPostgreSQL = "postgresql"
+	DebeziumConnectorSQLServer  = "sqlserver"
+)
+
+// IsEnabled reports whether any Debezium source is configured.
+func (s *DebeziumSpec) IsEnabled() bool {
+	return len(s.Sources) > 0
+}
+
+// NamespaceOrDefault returns the Debezium Server namespace.
+func (s *DebeziumSpec) NamespaceOrDefault() string {
+	return stringOrDefault(s.Namespace, DefaultDebeziumNamespace)
+}
+
+// ImageOrDefault returns the Debezium Server image.
+func (s *DebeziumSpec) ImageOrDefault() string {
+	return stringOrDefault(s.Image, DefaultDebeziumImage)
+}
+
+// PortOrDefault returns the source database port.
+func (s *DebeziumSourceSpec) PortOrDefault() int32 {
+	if s.Port != 0 {
+		return s.Port
+	}
+	switch s.Connector {
+	case DebeziumConnectorPostgreSQL:
+		return 5432
+	case DebeziumConnectorSQLServer:
+		return 1433
+	default:
+		return 3306
+	}
+}
+
+// IcebergNamespaceOrDefault returns the destination LakeKeeper namespace.
+func (s *DebeziumSourceSpec) IcebergNamespaceOrDefault() string {
+	return stringOrDefault(s.IcebergNamespace, strings.ReplaceAll(s.Name, "-", "_"))
+}
+
+// IsUpsert reports whether the sink upserts by primary key. Nil defaults to true.
+func (s *DebeziumSourceSpec) IsUpsert() bool {
+	return boolDefaultTrue(s.Upsert)
+}

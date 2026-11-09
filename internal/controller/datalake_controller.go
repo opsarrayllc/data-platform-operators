@@ -114,6 +114,13 @@ func (r *DataLakeReconciler) reconcile(ctx context.Context, dp *dataplatformv1al
 	}
 	progressing = progressing || sampleProgressing
 
+	debeziumProgressing, err := r.reconcileDebezium(ctx, dp, store, oidc)
+	if err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionFalse, reasonError, err.Error())
+		return ctrl.Result{}, err
+	}
+	progressing = progressing || debeziumProgressing
+
 	if progressing {
 		setCondition(dp, dataplatformv1alpha1.ConditionReady, metav1.ConditionFalse, reasonReconciling, "Waiting for enabled components to become ready")
 		return ctrl.Result{RequeueAfter: requeueWhileProgressing}, nil

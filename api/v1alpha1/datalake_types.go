@@ -41,15 +41,22 @@ const (
 	ConditionOpenFGAReady = "OpenFGAReady"
 	// ConditionSampleDataReady is True when demo Iceberg tables are seeded, or sample data is disabled.
 	ConditionSampleDataReady = "SampleDataReady"
+	// ConditionDebeziumReady is True when every Debezium Server source is running, or none are configured.
+	ConditionDebeziumReady = "DebeziumReady"
 
 	DefaultLakekeeperNamespace = "lakekeeper"
 	DefaultTrinoNamespace      = "trino"
 	DefaultMinioNamespace      = "minio"
 	DefaultKeycloakNamespace   = "keycloak"
 	DefaultOpenFGANamespace    = "openfga"
-	DefaultLakekeeperImage     = "quay.io/lakekeeper/catalog:v0.13.3"
-	DefaultTrinoImage          = "trinodb/trino:476"
-	DefaultPostgresImage       = "postgres:17"
+	DefaultDebeziumNamespace   = "debezium"
+	// DefaultDebeziumImage is Debezium Server with the community Iceberg sink
+	// (github.com/memiiso/debezium-server-iceberg). Its "latest" tag is a
+	// rolling build, so pin a release.
+	DefaultDebeziumImage   = "ghcr.io/memiiso/debezium-server-iceberg:1.2.1.Final"
+	DefaultLakekeeperImage = "quay.io/lakekeeper/catalog:v0.13.3"
+	DefaultTrinoImage      = "trinodb/trino:476"
+	DefaultPostgresImage   = "postgres:17"
 	// Upstream minio/minio and minio/mc images are no longer anonymously
 	// pullable (Docker Hub deleted the repos; quay.io returns 401). These are
 	// the pgsty community forks, which keep the same server and mc entrypoints.
@@ -146,6 +153,137 @@ type DataLakeSpec struct {
 	// Trino and the warehouse are ready, so you can try queries immediately.
 	// +optional
 	SampleData SampleDataSpec `json:"sampleData"`
+
+	// debezium streams changes from operational databases into the warehouse
+	// with Debezium Server and its Iceberg sink. Each source runs as its own
+	// single-replica Deployment that writes through the LakeKeeper REST catalog.
+	// Requires LakeKeeper.
+	// +optional
+	Debezium DebeziumSpec `json:"debezium"`
+}
+
+// DebeziumSpec configures change data capture into the warehouse.
+//
+// Debezium Server authenticates to LakeKeeper as the "debezium" ServiceAccount
+// in its namespace when auth.serviceAccountTokens is set, and otherwise as the
+// "debezium" client of embedded Keycloak. External OIDC issuers without
+// serviceAccountTokens are not supported, because the operator cannot predict
+// the principal to grant. The principal receives project_admin on the default
+// project while at least one source is configured.
+//
+// Offsets and schema history are stored as Iceberg tables in each source's
+// destination namespace, so the pods keep no local state.
+type DebeziumSpec struct {
+	// namespace is the Kubernetes namespace for Debezium Server. Defaults to
+	// "debezium". Use a unique value if you create multiple DataLakes.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the Debezium Server image. It must bundle the Iceberg sink.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// sources are the databases to capture. Removing a source deletes its
+	// Deployment, but not its replication slot, publication, or tables.
+	// +optional
+	// +listType=map
+	// +listMapKey=name
+	Sources []DebeziumSourceSpec `json:"sources,omitempty"`
+}
+
+// DebeziumSourceSpec is one database captured by its own Debezium Server.
+// +kubebuilder:validation:XValidation:rule="self.connector != 'postgresql' || has(self.database)",message="database is required for postgresql"
+// +kubebuilder:validation:XValidation:rule="self.connector != 'sqlserver' || has(self.database)",message="database is required for sqlserver"
+type DebeziumSourceSpec struct {
+	// name identifies the source. The Deployment is "debezium-<name>", and the
+	// name (with "-" replaced by "_") is the Debezium topic prefix, which
+	// starts every destination table name. Changing it re-snapshots the source
+	// into new tables.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Pattern=`^[a-z]([a-z0-9-]{0,38}[a-z0-9])?$`
+	Name string `json:"name"`
+
+	// connector is the source database type.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:Enum=mysql;mariadb;postgresql;sqlserver
+	Connector string `json:"connector"`
+
+	// host is the database hostname.
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinLength=1
+	Host string `json:"host"`
+
+	// port defaults to the connector's standard port (3306, 5432, or 1433).
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=65535
+	Port int32 `json:"port,omitempty"`
+
+	// database is the database to capture. Required for postgresql and
+	// sqlserver. For mysql and mariadb it limits capture to that database;
+	// leave it empty to capture every database the user can read, or use
+	// tableIncludeList.
+	// +optional
+	Database string `json:"database,omitempty"`
+
+	// tableIncludeList limits capture to these tables, as Debezium regular
+	// expressions: "<database>.<table>" for mysql and mariadb,
+	// "<schema>.<table>" for postgresql and sqlserver.
+	// +optional
+	// +listType=atomic
+	TableIncludeList []string `json:"tableIncludeList,omitempty"`
+
+	// credentialsSecretRef locates the replication user's username and
+	// password. The namespace defaults to the Debezium namespace; Secrets
+	// elsewhere are copied into it.
+	// +kubebuilder:validation:Required
+	CredentialsSecretRef PostgresCredentialsSecretRef `json:"credentialsSecretRef"`
+
+	// serverID is the MySQL/MariaDB replication client id. It must be unique
+	// among every replica and binlog client of the source cluster. Defaults to
+	// a value derived from the source name, between 5400 and 105399.
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	ServerID *int64 `json:"serverID,omitempty"`
+
+	// icebergNamespace is the LakeKeeper namespace (Trino schema) tables are
+	// written to, created if missing. Dots create nested namespaces. Defaults
+	// to the source name with "-" replaced by "_".
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`
+	IcebergNamespace string `json:"icebergNamespace,omitempty"`
+
+	// tablePrefix is prepended to every destination table name.
+	// +optional
+	// +kubebuilder:validation:Pattern=`^[A-Za-z0-9_]*$`
+	TablePrefix string `json:"tablePrefix,omitempty"`
+
+	// upsert keeps one row per primary key, applying updates and deletes.
+	// Deletes are kept as rows with __deleted = true. Tables without a primary
+	// key are always appended. Set false to append every change event.
+	// Defaults to true.
+	// +optional
+	Upsert *bool `json:"upsert,omitempty"`
+
+	// snapshotMode is Debezium's snapshot.mode, for example "initial" (the
+	// connector default) or "no_data".
+	// +optional
+	SnapshotMode string `json:"snapshotMode,omitempty"`
+
+	// extraProperties are added to Debezium Server's application.properties
+	// last, so they override operator-generated keys. Use full keys, such as
+	// "debezium.source.database.ssl.mode".
+	// +optional
+	ExtraProperties map[string]string `json:"extraProperties,omitempty"`
+
+	// resources are compute resource requirements for the Debezium Server container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// extraEnv is appended to the Debezium Server container. JAVA_OPTS sets
+	// JVM flags such as heap size.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
 }
 
 // AuthSpec configures identity for LakeKeeper and Trino.
@@ -924,6 +1062,7 @@ type DataLakeStatus struct {
 	// - "WarehouseReady": the Iceberg warehouse has been created
 	// - "TrinoReady": the Trino coordinator is ready
 	// - "SampleDataReady": demo Iceberg tables are seeded, or sample data is disabled
+	// - "DebeziumReady": every Debezium Server source is running, or none are configured
 	//
 	// The status of each condition is one of True, False, or Unknown.
 	// +listType=map

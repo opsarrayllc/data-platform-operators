@@ -127,6 +127,10 @@ func (r *DataLakeReconciler) embeddedOIDCConfig(ctx context.Context, dp *datapla
 	if err != nil {
 		return oidcConfig{}, err
 	}
+	debeziumSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCDebeziumClientSecret)
+	if err != nil {
+		return oidcConfig{}, err
+	}
 
 	return oidcConfig{
 		enabled:           true,
@@ -147,6 +151,7 @@ func (r *DataLakeReconciler) embeddedOIDCConfig(ctx context.Context, dp *datapla
 		opaPrincipal:      oidcSubjectPrefix + keycloakUUID("service-account", opaID),
 		trinoPrincipal:    oidcSubjectPrefix + keycloakUUID("service-account", trinoID),
 		debeziumClientID:  debeziumID,
+		debeziumSecret:    debeziumSecret,
 		debeziumPrincipal: oidcSubjectPrefix + keycloakUUID("service-account", debeziumID),
 		tokenURL:          oidcTokenURL(issuer),
 		proxyNamespace:    ns,

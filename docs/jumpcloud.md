@@ -5,7 +5,7 @@ Embedded Keycloak is for local development. In a shared environment, people sign
 There are two kinds of sign-in:
 
 - **People** sign in through the browser to the LakeKeeper UI, Trino, Superset, and Argo. They use JumpCloud directly, with the authorization-code flow.
-- **Machines** call LakeKeeper: the operator, Trino's Iceberg catalog, and the OPA bridge. They use the OAuth2 client-credentials grant, which JumpCloud doesn't offer. Set `spec.auth.serviceAccountTokens` so they use Kubernetes ServiceAccount tokens instead.
+- **Machines** call LakeKeeper: the operator, Trino's Iceberg catalog, the OPA bridge, and Debezium Server when `spec.debezium` has sources. They use the OAuth2 client-credentials grant, which JumpCloud doesn't offer. Set `spec.auth.serviceAccountTokens` so they use Kubernetes ServiceAccount tokens instead.
 
 ## JumpCloud facts that matter
 
@@ -81,6 +81,7 @@ With `serviceAccountTokens`, the operator does the following:
 - **LakeKeeper:** turns on Kubernetes authentication, with audience `lakekeeper`, and binds the `lakekeeper` ServiceAccount to `system:auth-delegator` so it can call TokenReview. LakeKeeper user ids for machines become `kubernetes~system:serviceaccount:<namespace>:<name>`.
 - **The operator itself:** mints 10-minute tokens for the `lakekeeper-operator` ServiceAccount. That account bootstraps LakeKeeper, so it becomes the server admin.
 - **Trino and OPA:** run as the `trino` and `opa` ServiceAccounts, each with a small busybox sidecar. The sidecar serves the pod's projected token on `http://127.0.0.1:8099/cgi-bin/token`, in the shape of an OAuth2 token response. The kubelet rotates the token file, and the sidecar reports a 5-minute expiry, so both clients pick up new tokens without a restart.
+- **Debezium Server** (when `spec.debezium` has sources): runs as the `debezium` ServiceAccount in the Debezium namespace, with the same sidecar. The operator grants `kubernetes~system:serviceaccount:debezium:debezium` `project_admin`. See [`debezium.md`](debezium.md).
 - **Grants:** gives Trino `project_admin` and OPA `security_admin`, and registers both as trusted Trino engines.
 
 ### LakeKeeper UI sign-in
