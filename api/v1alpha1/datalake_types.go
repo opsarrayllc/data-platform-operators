@@ -395,6 +395,35 @@ type ServiceAccountTokensSpec struct {
 	// OPA. It must provide busybox httpd with CGI support.
 	// +optional
 	ProxyImage string `json:"proxyImage,omitempty"`
+
+	// grants gives other workloads' ServiceAccounts, such as batch ingestion
+	// jobs, ownership of Iceberg namespaces in the warehouse. The operator
+	// registers each ServiceAccount as a LakeKeeper application user
+	// (kubernetes~system:serviceaccount:<namespace>:<name>), creates every
+	// listed namespace that is missing, and grants the user ownership on it.
+	// The workload authenticates with a projected token for spec.auth.
+	// serviceAccountTokens.audience. Removing an entry does not revoke the grant.
+	// +optional
+	// +listType=atomic
+	Grants []ServiceAccountGrant `json:"grants,omitempty"`
+}
+
+// ServiceAccountGrant gives one ServiceAccount ownership of Iceberg namespaces.
+type ServiceAccountGrant struct {
+	// namespace is the ServiceAccount's Kubernetes namespace.
+	// +kubebuilder:validation:MinLength=1
+	Namespace string `json:"namespace"`
+
+	// name is the ServiceAccount's name.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// icebergNamespaces are top-level namespaces in the managed warehouse that
+	// this ServiceAccount owns: it can create, change and drop their tables.
+	// +kubebuilder:validation:MinItems=1
+	// +listType=set
+	// +kubebuilder:validation:items:Pattern=`^[a-z0-9_]+$`
+	IcebergNamespaces []string `json:"icebergNamespaces"`
 }
 
 // KeycloakSpec configures operator-managed Keycloak.

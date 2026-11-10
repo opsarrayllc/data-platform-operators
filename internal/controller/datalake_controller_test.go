@@ -43,6 +43,7 @@ type fakeCatalog struct {
 	warehouses  []string
 	grants      []string
 	accessRoles []string
+	nsOwners    []string
 	authzStores []AuthzStoreRequest
 	authzTuples []AuthzTuple
 	jsonBody    []byte
@@ -68,6 +69,15 @@ func (f *fakeCatalog) EnsureWarehouse(_ context.Context, _, _ string, _ int32, _
 func (f *fakeCatalog) EnsureAccessRoles(_ context.Context, _, _ string, _ int32, _ string, _ string, roles []CatalogAccessRole) error {
 	for _, role := range roles {
 		f.accessRoles = append(f.accessRoles, role.Name)
+	}
+	return nil
+}
+
+func (f *fakeCatalog) EnsureNamespaceOwners(_ context.Context, _, _ string, _ int32, _ string, _ string, owners []NamespaceOwner) error {
+	for _, o := range owners {
+		for _, ns := range o.Namespaces {
+			f.nsOwners = append(f.nsOwners, o.Principal.Subject+"="+ns)
+		}
 	}
 	return nil
 }
@@ -627,11 +637,18 @@ var _ = Describe("DataLake Controller", func() {
 		}))).To(Succeed())
 
 		catalog.grants = nil
+		catalog.nsOwners = nil
 		withDebezium := &dataplatformv1alpha1.DataLake{
 			ObjectMeta: metav1.ObjectMeta{Name: resourceName},
 			Spec: dataplatformv1alpha1.DataLakeSpec{
 				Auth: dataplatformv1alpha1.AuthSpec{
-					ServiceAccountTokens: &dataplatformv1alpha1.ServiceAccountTokensSpec{},
+					ServiceAccountTokens: &dataplatformv1alpha1.ServiceAccountTokensSpec{
+						Grants: []dataplatformv1alpha1.ServiceAccountGrant{{
+							Namespace:         "argo-workflows",
+							Name:              "ga4-loader",
+							IcebergNamespaces: []string{"google_analytics", "marketing"},
+						}},
+					},
 				},
 				Debezium: dataplatformv1alpha1.DebeziumSpec{
 					Sources: []dataplatformv1alpha1.DebeziumSourceSpec{{
@@ -657,6 +674,13 @@ var _ = Describe("DataLake Controller", func() {
 		markDeploymentReady(ctx, nameLakekeeper, nameLakekeeper)
 		_, err = reconciler.Reconcile(ctx, reconcile.Request{NamespacedName: typeNamespacedName})
 		Expect(err).NotTo(HaveOccurred())
+
+		By("granting the ServiceAccount its Iceberg namespaces")
+		// Every reconcile re-applies the grants; they are idempotent.
+		Expect(catalog.nsOwners).To(ContainElements(
+			"kubernetes~system:serviceaccount:argo-workflows:ga4-loader=google_analytics",
+			"kubernetes~system:serviceaccount:argo-workflows:ga4-loader=marketing",
+		))
 
 		By("granting the debezium ServiceAccount")
 		Expect(catalog.grants).To(ContainElement("kubernetes~system:serviceaccount:debezium:debezium=/project_admin"))

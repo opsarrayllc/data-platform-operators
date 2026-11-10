@@ -79,6 +79,13 @@ func (r *DataLakeReconciler) reconcileWarehouse(ctx context.Context, dp *datapla
 		return err
 	}
 	log.Info("Ensured LakeKeeper warehouse", "name", req.Name)
+	if owners := namespaceOwners(dp); len(owners) > 0 {
+		if err := r.Catalog.EnsureNamespaceOwners(ctx, ns, nameLakekeeper, lakekeeperPort, token, req.Name, owners); err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+		log.Info("Ensured LakeKeeper namespace owners", "principals", len(owners))
+	}
 	if err := r.reconcileAccessGroups(ctx, dp, oidc, fga); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionWarehouseReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
