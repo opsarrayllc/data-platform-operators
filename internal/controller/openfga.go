@@ -348,6 +348,16 @@ func (r *DataLakeReconciler) applyOpenFGADeployment(
 		secretEnv("OPENFGA_DATASTORE_USERNAME", conn.Secret, keyPostgresUsername),
 		secretEnv("OPENFGA_DATASTORE_PASSWORD", conn.Secret, keyPostgresPassword),
 		{Name: "OPENFGA_PLAYGROUND_ENABLED", Value: "false"},
+		// LakeKeeper asks OpenFGA for every request and every UI page (the
+		// permissions pages send ~20 Checks at once), and the operator's own
+		// reconcile adds thousands of datastore queries a minute. Uncached,
+		// Checks queue behind that load, pass the 3s request timeout, and
+		// LakeKeeper reports "Authorization service is unavailable". The
+		// cache controller drops cached results when tuples are written, so
+		// new grants still apply within seconds.
+		{Name: "OPENFGA_CHECK_QUERY_CACHE_ENABLED", Value: "true"},
+		{Name: "OPENFGA_CHECK_ITERATOR_CACHE_ENABLED", Value: "true"},
+		{Name: "OPENFGA_CACHE_CONTROLLER_ENABLED", Value: "true"},
 		{Name: "OPENFGA_AUTHN_METHOD", Value: "preshared"},
 		{
 			Name: "OPENFGA_AUTHN_PRESHARED_KEYS",

@@ -126,6 +126,10 @@ var _ = Describe("External Postgres", func() {
 		env := pod.Containers[0].Env
 		Expect(envValue(env, "OPENFGA_DATASTORE_URI")).To(Equal("postgres://pg.example.com:5432/openfga?sslmode=require"))
 		Expect(envSecretName(env, "OPENFGA_DATASTORE_PASSWORD")).To(Equal(secretPostgresExternal))
+		// Uncached Checks time out under LakeKeeper's load.
+		for _, name := range []string{"OPENFGA_CHECK_QUERY_CACHE_ENABLED", "OPENFGA_CHECK_ITERATOR_CACHE_ENABLED", "OPENFGA_CACHE_CONTROLLER_ENABLED"} {
+			Expect(envValue(env, name)).To(Equal("true"), name)
+		}
 		for _, c := range append(pod.InitContainers, pod.Containers...) {
 			for _, e := range c.Env {
 				Expect(e.Value).NotTo(ContainSubstring(testExternalPGPassword), "container %s env %s", c.Name, e.Name)
