@@ -57,6 +57,18 @@ type OrchestrationReconciler struct {
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=roles;rolebindings;clusterroles;clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=apiextensions.k8s.io,resources=customresourcedefinitions,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=scheduling.k8s.io,resources=priorityclasses,verbs=get;list;watch;create;update;patch;delete
+//
+// Kubernetes only lets the operator create a Role or ClusterRole whose rules
+// it already holds itself. The markers below cover everything granted in
+// argo.go: controllerClusterRules, serverClusterRules, the argo-role leader
+// election Role, and the per-group Roles. Keep them in sync when those change.
+// +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;create;update
+// +kubebuilder:rbac:groups="",resources=pods;pods/exec,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=pods/log,verbs=get;list;watch;delete
+// +kubebuilder:rbac:groups="",resources=persistentvolumeclaims;persistentvolumeclaims/finalizers,verbs=get;create;update;delete
+// +kubebuilder:rbac:groups="",resources=events,verbs=watch;create;patch
+// +kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;create;delete
+// +kubebuilder:rbac:groups=argoproj.io,resources=workflows;workflows/finalizers;workflowtasksets;workflowtasksets/finalizers;workflowartifactgctasks;workflowtemplates;workflowtemplates/finalizers;clusterworkflowtemplates;clusterworkflowtemplates/finalizers;cronworkflows;cronworkflows/finalizers;workflowtaskresults;workfloweventbindings;eventsources;sensors,verbs=get;list;watch;create;update;patch;delete;deletecollection
 
 func (r *OrchestrationReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := logf.FromContext(ctx)
