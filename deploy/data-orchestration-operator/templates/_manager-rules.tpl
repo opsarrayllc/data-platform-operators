@@ -4,6 +4,8 @@
   - ""
   resources:
   - configmaps
+  - pods
+  - pods/exec
   - secrets
   - serviceaccounts
   - services
@@ -18,6 +20,14 @@
 - apiGroups:
   - ""
   resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - watch
+- apiGroups:
+  - ""
+  resources:
   - namespaces
   verbs:
   - create
@@ -25,6 +35,25 @@
   - list
   - patch
   - update
+  - watch
+- apiGroups:
+  - ""
+  resources:
+  - persistentvolumeclaims
+  - persistentvolumeclaims/finalizers
+  verbs:
+  - create
+  - delete
+  - get
+  - update
+- apiGroups:
+  - ""
+  resources:
+  - pods/log
+  verbs:
+  - delete
+  - get
+  - list
   - watch
 - apiGroups:
   - apiextensions.k8s.io
@@ -51,6 +80,41 @@
   - update
   - watch
 - apiGroups:
+  - argoproj.io
+  resources:
+  - clusterworkflowtemplates
+  - clusterworkflowtemplates/finalizers
+  - cronworkflows
+  - cronworkflows/finalizers
+  - eventsources
+  - sensors
+  - workflowartifactgctasks
+  - workfloweventbindings
+  - workflows
+  - workflows/finalizers
+  - workflowtaskresults
+  - workflowtasksets
+  - workflowtasksets/finalizers
+  - workflowtemplates
+  - workflowtemplates/finalizers
+  verbs:
+  - create
+  - delete
+  - deletecollection
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - get
+  - update
+- apiGroups:
   - dataplatform.opsarray.io
   resources:
   - orchestrations
@@ -76,6 +140,14 @@
   - get
   - patch
   - update
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
+  verbs:
+  - create
+  - delete
+  - get
 - apiGroups:
   - rbac.authorization.k8s.io
   resources:

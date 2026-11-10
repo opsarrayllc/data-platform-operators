@@ -79,7 +79,7 @@ Permissions), or with:
 
 ```sh
 POST /management/v1/permissions/namespace/{namespace_id}/assignments
-{"writes": [{"type": "ownership", "user": "kubernetes~system:serviceaccount:argo:ga4-loader"}]}
+{"writes": [{"type": "ownership", "user": "kubernetes~system:serviceaccount:<namespace>:ga4-loader"}]}
 ```
 
 If the namespace does not exist yet, create it first, or grant `create` on

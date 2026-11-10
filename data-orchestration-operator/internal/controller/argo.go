@@ -86,10 +86,7 @@ func (r *OrchestrationReconciler) applyControllerRBAC(ctx context.Context, o *or
 	role := &rbacv1.Role{ObjectMeta: metav1.ObjectMeta{Name: "argo-role", Namespace: ns}}
 	if err := r.apply(ctx, o, role, func() error {
 		ensureLabels(role, labelsFor(o, componentController))
-		role.Rules = []rbacv1.PolicyRule{
-			rule("coordination.k8s.io", []string{"leases"}, []string{"create", "get", "update"}),
-			rule("", []string{"secrets"}, []string{"get"}),
-		}
+		role.Rules = controllerNamespaceRules()
 		return nil
 	}); err != nil {
 		return err
@@ -360,6 +357,15 @@ func (r *OrchestrationReconciler) applyServerDeployment(ctx context.Context, o *
 
 func rule(group string, resources, verbs []string) rbacv1.PolicyRule {
 	return rbacv1.PolicyRule{APIGroups: []string{group}, Resources: resources, Verbs: verbs}
+}
+
+// controllerNamespaceRules are the workflow controller's rules in its own
+// namespace: leader election and reading its Secrets.
+func controllerNamespaceRules() []rbacv1.PolicyRule {
+	return []rbacv1.PolicyRule{
+		rule("coordination.k8s.io", []string{"leases"}, []string{"create", "get", "update"}),
+		rule("", []string{"secrets"}, []string{"get"}),
+	}
 }
 
 func controllerClusterRules() []rbacv1.PolicyRule {
