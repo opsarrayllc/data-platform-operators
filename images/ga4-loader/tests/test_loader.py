@@ -155,3 +155,24 @@ def test_empty_arrow_has_schema():
     t = to_arrow("1", PAGES, [], TYPES, False, False, LOADED)
     assert t.num_rows == 0 and "page_path" in t.schema.names
     assert t.schema.field("screen_page_views").type == pa.int64()
+
+
+def test_existing_namespace_is_not_recreated(tmp_path):
+    # LakeKeeper answers create_namespace with 403 for a namespace owner that
+    # lacks warehouse-level create, even when the namespace exists.
+    from pyiceberg.exceptions import ForbiddenError
+
+    lake = LocalLake(tmp_path)
+    lake.catalog().create_namespace("google_analytics")
+
+    def forbidden(*_a, **_k):
+        raise ForbiddenError("WarehouseActionForbidden: can_create_namespace")
+
+    lake._cat.create_namespace = forbidden
+    lake.ensure_namespace()  # exists: no create attempted
+
+    other = LocalLake(tmp_path)
+    other.namespace = "missing"
+    other._cat.create_namespace = forbidden
+    with pytest.raises(SystemExit, match="grants"):
+        other.ensure_namespace()
