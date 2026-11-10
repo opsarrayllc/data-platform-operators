@@ -83,6 +83,15 @@ With `serviceAccountTokens`, the operator does the following:
 - **Trino and OPA:** run as the `trino` and `opa` ServiceAccounts, each with a small busybox sidecar. The sidecar serves the pod's projected token on `http://127.0.0.1:8099/cgi-bin/token`, in the shape of an OAuth2 token response. The kubelet rotates the token file, and the sidecar reports a 5-minute expiry, so both clients pick up new tokens without a restart.
 - **Debezium Server** (when `spec.debezium` has sources): runs as the `debezium` ServiceAccount in the Debezium namespace, with the same sidecar. The operator grants `kubernetes~system:serviceaccount:debezium:debezium` `project_admin`. See [`debezium.md`](debezium.md).
 - **Grants:** gives Trino `project_admin` and OPA `security_admin`, and registers both as trusted Trino engines.
+- **Other workloads** (`serviceAccountTokens.grants`): batch jobs such as Argo Workflows run as their own ServiceAccounts. For each grant, the operator registers `kubernetes~system:serviceaccount:<namespace>:<name>` as a LakeKeeper application user, creates the listed Iceberg namespaces when they're missing, and grants that user `ownership` on each one. The pod authenticates with a projected token for audience `lakekeeper`. Removing a grant doesn't revoke it.
+
+  ```yaml
+  serviceAccountTokens:
+    grants:
+      - namespace: argo-workflows
+        name: ga4-loader
+        icebergNamespaces: [google_analytics]
+  ```
 
 ### LakeKeeper UI sign-in
 

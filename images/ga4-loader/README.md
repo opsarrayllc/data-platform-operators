@@ -69,22 +69,24 @@ column. Rows loaded before the change read that column as null.
 
 ## LakeKeeper access
 
-The loader signs in with its pod's ServiceAccount token. On every run, it
-registers itself as a LakeKeeper application user, with the id
-`kubernetes~system:serviceaccount:<namespace>:<serviceaccount>`.
+The loader signs in with its pod's ServiceAccount token. Its LakeKeeper user
+id is `kubernetes~system:serviceaccount:<namespace>:<serviceaccount>`.
 
-A LakeKeeper admin then grants that user **ownership** on the target
-namespace, once. This can be done in the UI (warehouse → namespace →
-Permissions), or with:
+Give it the target namespace through the DataLake. The operator then
+registers the user, creates the namespace if it is missing, and grants the
+user ownership on it:
 
-```sh
-POST /management/v1/permissions/namespace/{namespace_id}/assignments
-{"writes": [{"type": "ownership", "user": "kubernetes~system:serviceaccount:<namespace>:ga4-loader"}]}
+```yaml
+spec:
+  auth:
+    serviceAccountTokens:
+      grants:
+        - namespace: argo-workflows
+          name: ga4-loader
+          icebergNamespaces: [google_analytics]
 ```
 
-If the namespace does not exist yet, create it first, or grant `create` on
-the warehouse. S3 access is vended by LakeKeeper, so the pod needs no AWS
-identity.
+S3 access is vended by LakeKeeper, so the pod needs no AWS identity.
 
 ## Tests
 

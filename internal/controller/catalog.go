@@ -47,6 +47,7 @@ type CatalogClient interface {
 	EnsureGrants(ctx context.Context, namespace, service string, port int32, bearer string, principals []CatalogPrincipal) error
 	EnsureWarehouse(ctx context.Context, namespace, service string, port int32, bearer string, req WarehouseRequest) error
 	EnsureAccessRoles(ctx context.Context, namespace, service string, port int32, bearer, warehouseName string, roles []CatalogAccessRole) error
+	EnsureNamespaceOwners(ctx context.Context, namespace, service string, port int32, bearer, warehouseName string, owners []NamespaceOwner) error
 	EnsureAuthzStore(ctx context.Context, namespace, service string, port int32, bearer string, req AuthzStoreRequest) (string, error)
 	EnsureAuthzTuples(ctx context.Context, namespace, service string, port int32, bearer, storeID string, tuples []AuthzTuple) error
 	JSON(ctx context.Context, method, namespace, service string, port int32, path, bearer string, payload any) (int, []byte, error)
@@ -182,6 +183,8 @@ type proxyCatalogClient struct {
 	kube       kubernetes.Interface
 	restClient rest.Interface
 	http       *http.Client
+	// baseURL, when set, replaces service discovery (tests).
+	baseURL string
 }
 
 // NewProxyCatalogClient talks to in-cluster services. Keycloak token requests
@@ -634,6 +637,9 @@ func (c *proxyCatalogClient) do(
 }
 
 func (c *proxyCatalogClient) serviceBaseURL(ctx context.Context, namespace, service string, port int32) (string, func(), error) {
+	if c.baseURL != "" {
+		return c.baseURL, func() {}, nil
+	}
 	if runningInCluster() {
 		return fmt.Sprintf("http://%s.%s.svc:%d", service, namespace, port), func() {}, nil
 	}

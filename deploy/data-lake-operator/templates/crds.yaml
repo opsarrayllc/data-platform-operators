@@ -342,6 +342,45 @@ spec:
                           audience is requested in every token and is the only audience LakeKeeper
                           accepts for Kubernetes tokens. Defaults to "lakekeeper".
                         type: string
+                      grants:
+                        description: |-
+                          grants gives other workloads' ServiceAccounts, such as batch ingestion
+                          jobs, ownership of Iceberg namespaces in the warehouse. The operator
+                          registers each ServiceAccount as a LakeKeeper application user
+                          (kubernetes~system:serviceaccount:<namespace>:<name>), creates every
+                          listed namespace that is missing, and grants the user ownership on it.
+                          The workload authenticates with a projected token for spec.auth.
+                          serviceAccountTokens.audience. Removing an entry does not revoke the grant.
+                        items:
+                          description: ServiceAccountGrant gives one ServiceAccount
+                            ownership of Iceberg namespaces.
+                          properties:
+                            icebergNamespaces:
+                              description: |-
+                                icebergNamespaces are top-level namespaces in the managed warehouse that
+                                this ServiceAccount owns: it can create, change and drop their tables.
+                              items:
+                                pattern: ^[a-z0-9_]+$
+                                type: string
+                              minItems: 1
+                              type: array
+                              x-kubernetes-list-type: set
+                            name:
+                              description: name is the ServiceAccount's name.
+                              minLength: 1
+                              type: string
+                            namespace:
+                              description: namespace is the ServiceAccount's Kubernetes
+                                namespace.
+                              minLength: 1
+                              type: string
+                          required:
+                          - icebergNamespaces
+                          - name
+                          - namespace
+                          type: object
+                        type: array
+                        x-kubernetes-list-type: atomic
                       proxyImage:
                         description: |-
                           proxyImage serves the projected token on 127.0.0.1 next to Trino and
