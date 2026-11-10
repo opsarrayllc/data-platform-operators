@@ -27,3 +27,22 @@ jobs:
         run: |
           go mod tidy
           make test
+
+  ga4-loader:
+    permissions:
+      contents: read
+    name: GA4 loader
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      # Tests run inside the image, so they exercise the pinned requirements.
+      - name: Build and test
+        working-directory: images/ga4-loader
+        run: |
+          docker build -t ga4-loader:test .
+          docker run --rm --user 0 --entrypoint sh -v "$PWD/tests:/app/tests:ro" ga4-loader:test -c \
+            'pip install -q --root-user-action=ignore "pyiceberg[sql-sqlite]==0.12.0" pytest==8.4.2 && python -m pytest -q -p no:cacheprovider tests'

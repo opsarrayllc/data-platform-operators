@@ -68,8 +68,9 @@ CI publishes multi-arch (`linux/amd64`, `linux/arm64`) images to GitHub Packages
 | `ghcr.io/opsarrayllc/data-analytics-operator` | `data-analytics-operator/` |
 | `ghcr.io/opsarrayllc/data-orchestration-operator` | `data-orchestration-operator/` |
 | `ghcr.io/opsarrayllc/data-platform-superset` | `data-analytics-operator/images/superset/` |
+| `ghcr.io/opsarrayllc/data-platform-ga4-loader` | `images/ga4-loader/` ([GA4 → Iceberg batch job](images/ga4-loader/README.md)) |
 
-The operator image tags come from the ref that triggered the build:
+The operator and GA4 loader image tags come from the ref that triggered the build:
 - `latest` and `main` from the default branch
 - `sha-<commit>` for every build
 - semver tags (`1.2.3`, `1.2`, `1`) when you push a `v*` tag

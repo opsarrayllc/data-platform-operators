@@ -39,6 +39,13 @@ jobs:
           - image: data-platform-superset
             context: data-analytics-operator/images/superset
             superset-version: 5.0.0
+            qemu: true
+          # Batch ingestion job run by Argo Workflows (data-orchestration-
+          # operator). Tagged like the operators: main, sha-<commit>, and the
+          # release versions.
+          - image: data-platform-ga4-loader
+            context: images/ga4-loader
+            qemu: true
     env:
       IMAGE: ${{ github.repository_owner }}/${{ matrix.image }}
     permissions:
@@ -53,9 +60,9 @@ jobs:
         with:
           persist-credentials: false
 
-      # The Go images cross-compile, but the Superset image runs pip for arm64.
+      # The Go images cross-compile, but the Python images run pip for arm64.
       - name: Set up QEMU
-        if: matrix.superset-version != ''
+        if: matrix.qemu
         uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Docker Buildx
