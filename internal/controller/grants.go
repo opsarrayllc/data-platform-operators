@@ -53,8 +53,9 @@ func namespaceOwners(dp *dataplatformv1alpha1.DataLake) []NamespaceOwner {
 	return owners
 }
 
-// EnsureNamespaceOwners provisions each owner, creates its namespaces in the
-// warehouse when missing, and grants it ownership on them. The operator owns
+// EnsureNamespaceOwners provisions each owner, grants it describe on the
+// warehouse, creates its namespaces when missing, and grants it ownership on
+// them. The operator owns
 // the warehouse it created, so it may create namespaces and pass ownership.
 func (c *proxyCatalogClient) EnsureNamespaceOwners(
 	ctx context.Context,
@@ -70,10 +71,25 @@ func (c *proxyCatalogClient) EnsureNamespaceOwners(
 	if err != nil {
 		return err
 	}
+	warehouseID, err := c.warehouseID(ctx, namespace, service, port, bearer, warehouseName)
+	if err != nil {
+		return err
+	}
 	for _, owner := range owners {
 		p := owner.Principal
 		if err := c.post(ctx, namespace, service, port,
 			"management/v1/user", bearer, catalogUserJSON(p), "provision user "+p.Name); err != nil {
+			return err
+		}
+		// Every catalog request checks can_use on the warehouse, defined as
+		// "describe or can_get_metadata from namespace". Without describe,
+		// OpenFGA walks every namespace and table in the warehouse to answer
+		// it, which takes tens of thousands of datastore queries per request
+		// and times out. describe shows names and schemas, not data.
+		describe := namespaceAssignments{Writes: []namespaceAssignment{{Type: catalogRelationDescribe, User: p.Subject}}}
+		if err := c.post(ctx, namespace, service, port,
+			"management/v1/permissions/warehouse/"+warehouseID+"/assignments", bearer, describe,
+			"grant describe on warehouse "+warehouseName+" to "+p.Name); err != nil {
 			return err
 		}
 		for _, ns := range owner.Namespaces {
@@ -93,7 +109,7 @@ func (c *proxyCatalogClient) EnsureNamespaceOwners(
 }
 
 // namespaceAssignments is the body of
-// POST management/v1/permissions/namespace/{id}/assignments.
+// POST management/v1/permissions/{namespace,warehouse}/{id}/assignments.
 type namespaceAssignments struct {
 	Writes []namespaceAssignment `json:"writes"`
 }
