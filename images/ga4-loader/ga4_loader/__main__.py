@@ -90,7 +90,6 @@ def main(argv: list[str] | None = None) -> int:
         token_file=env("LAKEKEEPER_TOKEN_FILE", "/var/run/secrets/lakekeeper/token"),
         region=env("AWS_REGION", "us-east-1"),
     )
-    lake.register()
     lake.ensure_namespace()
     ga = GA4()
 

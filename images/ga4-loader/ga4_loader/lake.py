@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import datetime as dt
 import logging
-import os
 
 import pyarrow as pa
-import requests
 from pyiceberg.catalog import load_catalog
 from pyiceberg.catalog.rest import RestCatalog
-from pyiceberg.exceptions import NamespaceAlreadyExistsError, NoSuchTableError
+from pyiceberg.exceptions import ForbiddenError, NamespaceAlreadyExistsError, NoSuchTableError
 from pyiceberg.expressions import And, EqualTo, GreaterThanOrEqual, LessThanOrEqual
 from pyiceberg.table import Table
 from pyiceberg.transforms import IdentityTransform, YearTransform
@@ -51,30 +49,28 @@ class Lake:
             },
         )
 
-    def register(self) -> None:
-        """Provision this ServiceAccount as a LakeKeeper user.
-
-        LakeKeeper only lists principals it has seen, so the admin can grant
-        the loader access only after this has run once.
-        """
-        base = self.uri.removesuffix("/catalog")
-        resp = requests.post(
-            f"{base}/management/v1/user",
-            json={"name": os.environ.get("LAKEKEEPER_USER_NAME", "ga4-loader"),
-                  "user-type": "application", "update-if-exists": True},
-            headers={"Authorization": f"Bearer {self._token()}"},
-            timeout=30,
-        )
-        if resp.status_code >= 400:
-            log.warning("LakeKeeper user registration returned %s: %s", resp.status_code, resp.text[:300])
-
     def ensure_namespace(self) -> None:
+        """Check the namespace exists, creating it only if it is missing.
+
+        The data lake operator normally creates it and grants this
+        ServiceAccount ownership (DataLake spec.auth.serviceAccountTokens.
+        grants). LakeKeeper checks the warehouse-level create_namespace
+        permission before it checks for an existing namespace, so an owner
+        without that permission must not try to create one that is there.
+        """
         cat = self.catalog()
+        if cat.namespace_exists(self.namespace):
+            return
         try:
             cat.create_namespace(self.namespace)
             log.info("created namespace %s", self.namespace)
         except NamespaceAlreadyExistsError:
             pass
+        except ForbiddenError as e:
+            raise SystemExit(
+                f"namespace {self.namespace} does not exist and this ServiceAccount may not create it; "
+                f"add it to the DataLake's spec.auth.serviceAccountTokens.grants ({e})"
+            ) from e
 
     def _table(self, cat: RestCatalog, name: str, schema: pa.Schema) -> Table:
         ident = (self.namespace, name)
