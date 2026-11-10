@@ -90,6 +90,7 @@ const (
 	catalogRelationAdmin         = "admin"
 	catalogRelationProjectAdmin  = "project_admin"
 	catalogRelationSecurityAdmin = "security_admin"
+	catalogRelationDescribe      = "describe"
 	configMapOPAPolicies         = "opa-policies"
 	keyEncryption                = "LAKEKEEPER__PG_ENCRYPTION_KEY"
 	keyS3Access                  = "AWS_ACCESS_KEY_ID"

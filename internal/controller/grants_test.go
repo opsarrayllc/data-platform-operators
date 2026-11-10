@@ -31,11 +31,12 @@ import (
 
 // fakeLakekeeper serves the endpoints EnsureNamespaceOwners calls.
 type fakeLakekeeper struct {
-	mu         sync.Mutex
-	namespaces map[string]string // name -> uuid
-	calls      []string
-	grants     []map[string]any
-	users      []map[string]any
+	mu              sync.Mutex
+	namespaces      map[string]string // name -> uuid
+	calls           []string
+	grants          []map[string]any
+	warehouseGrants []map[string]any
+	users           []map[string]any
 }
 
 func (f *fakeLakekeeper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -57,6 +58,11 @@ func (f *fakeLakekeeper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write([]byte(`{"overrides":{"prefix":"wh-1"},"defaults":{}}`))
+	case r.Method == http.MethodGet && r.URL.Path == "/management/v1/warehouse":
+		_, _ = w.Write([]byte(`{"warehouses":[{"id":"wh-1","name":"keyme"}]}`))
+	case r.Method == http.MethodPost && r.URL.Path == "/management/v1/permissions/warehouse/wh-1/assignments":
+		f.warehouseGrants = append(f.warehouseGrants, payload)
+		w.WriteHeader(http.StatusNoContent)
 	case r.Method == http.MethodPost && r.URL.Path == "/management/v1/user":
 		f.users = append(f.users, payload)
 		w.WriteHeader(http.StatusCreated)
@@ -129,6 +135,12 @@ func TestEnsureNamespaceOwners(t *testing.T) {
 	}
 	if len(lk.users) != 2 || lk.users[0]["id"] != subject || lk.users[0]["user-type"] != "application" {
 		t.Errorf("users = %v", lk.users)
+	}
+	if len(lk.warehouseGrants) != 2 {
+		t.Fatalf("warehouse grants = %v", lk.warehouseGrants)
+	}
+	if w := lk.warehouseGrants[0]["writes"].([]any)[0].(map[string]any); w["type"] != "describe" || w["user"] != subject {
+		t.Errorf("warehouse grant %v", w)
 	}
 	if len(lk.grants) != 4 {
 		t.Fatalf("grants = %v", lk.grants)
