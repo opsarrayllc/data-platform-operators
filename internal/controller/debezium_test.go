@@ -54,6 +54,7 @@ func TestDebeziumPropertiesPostgresKeycloak(t *testing.T) {
 		"debezium.source.slot.name":                   "debezium_billing",
 		"debezium.source.publication.name":            "debezium_billing",
 		"debezium.source.publication.autocreate.mode": "filtered",
+		"debezium.source.offset.mismatch.strategy":    "trust_greater_lsn",
 		"debezium.source.table.include.list":          "public.invoices,public.payments",
 		"debezium.source.database.sslmode":            "require",
 		"debezium.sink.iceberg.warehouse":             "keyme",
