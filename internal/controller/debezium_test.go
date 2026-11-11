@@ -55,6 +55,10 @@ func TestDebeziumPropertiesPostgresKeycloak(t *testing.T) {
 		"debezium.source.publication.name":            "debezium_billing",
 		"debezium.source.publication.autocreate.mode": "filtered",
 		"debezium.source.offset.mismatch.strategy":    "trust_greater_lsn",
+		// Heartbeats advance the slot when the captured tables are quiet.
+		"debezium.source.heartbeat.interval.ms":       "60000",
+		"debezium.source.heartbeat.action.query":      "SELECT pg_logical_emit_message(false, 'debezium-heartbeat', now()::text)",
+		"debezium.source.message.prefix.exclude.list": "debezium-heartbeat",
 		"debezium.source.table.include.list":          "public.invoices,public.payments",
 		"debezium.source.database.sslmode":            "require",
 		"debezium.sink.iceberg.warehouse":             "keyme",
