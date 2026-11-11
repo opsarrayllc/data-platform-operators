@@ -146,6 +146,9 @@ var _ = Describe("Analytics Controller", func() {
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`connect_args["verify"] = "/app/trino-ca/ca.crt"`))
 		// Superset's per-user OAuth session must verify against the same CA.
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("session.verify = verify"))
+		// JumpCloud only accepts client_secret_basic for the Trino client.
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("auth=(config[\"id\"], config[\"secret\"])"))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("TrinoEngineSpec.get_oauth2_token = classmethod(get_oauth2_token)"))
 		caCopy := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTrinoCA, Namespace: nameSuperset}, caCopy)).To(Succeed())
 		Expect(caCopy.Data[keyTrinoCA]).To(Equal(testTrinoCA))

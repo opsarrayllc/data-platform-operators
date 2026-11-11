@@ -600,6 +600,7 @@ func supersetConfig(
 		b.WriteString("        \"request_content_type\": \"data\",\n")
 		b.WriteString("    },\n")
 		b.WriteString("}\n")
+		writeTrinoOAuth2BasicAuth(&b)
 		b.WriteString("def DB_CONNECTION_MUTATOR(uri, params, username, security_manager, source):\n")
 		b.WriteString("    import base64, json\n")
 		b.WriteString("    connect_args = params.setdefault(\"connect_args\", {})\n")
@@ -637,6 +638,54 @@ func supersetConfig(
 
 	cfg := b.String()
 	return cfg, hashData(cfg)
+}
+
+// writeTrinoOAuth2BasicAuth makes Superset authenticate to the token endpoint
+// with HTTP Basic (client_secret_basic) when it exchanges or refreshes per-user
+// Trino tokens. Superset only sends the secret in the request body
+// (client_secret_post), which JumpCloud rejects for clients set to Basic, the
+// method Trino itself uses for the same client. Every OAuth 2.0 server must
+// support Basic, Keycloak included. An error response is raised as an OAuth2
+// error instead of failing later on a missing expires_in.
+func writeTrinoOAuth2BasicAuth(b *strings.Builder) {
+	b.WriteString(`def FLASK_APP_MUTATOR(app):
+    import requests
+    from superset.db_engine_specs.trino import TrinoEngineSpec
+    from superset.exceptions import OAuth2Error
+
+    def token_request(config, body):
+        timeout = app.config["DATABASE_OAUTH2_TIMEOUT"].total_seconds()
+        response = requests.post(
+            config["token_request_uri"],
+            data=body,
+            auth=(config["id"], config["secret"]),
+            timeout=timeout,
+        )
+        try:
+            token = response.json()
+        except ValueError:
+            raise OAuth2Error(f"token endpoint returned HTTP {response.status_code}")
+        if "error" in token or "access_token" not in token:
+            raise OAuth2Error(token.get("error_description") or token.get("error") or "no access_token in response")
+        token.setdefault("expires_in", 3600)
+        return token
+
+    def get_oauth2_token(cls, config, code):
+        return token_request(config, {
+            "code": code,
+            "redirect_uri": config["redirect_uri"],
+            "grant_type": "authorization_code",
+        })
+
+    def get_oauth2_fresh_token(cls, config, refresh_token):
+        return token_request(config, {
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        })
+
+    TrinoEngineSpec.get_oauth2_token = classmethod(get_oauth2_token)
+    TrinoEngineSpec.get_oauth2_fresh_token = classmethod(get_oauth2_fresh_token)
+`)
 }
 
 // Superset OAuth provider names. Flask-AppBuilder has built-in user info
