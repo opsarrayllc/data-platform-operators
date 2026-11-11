@@ -131,6 +131,15 @@ var _ = Describe("Orchestration Controller", func() {
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: group.name, Namespace: orchestrationv1alpha1.DefaultNamespace}, role)).To(Succeed())
 			Expect(role.Rules[0].Verbs).To(Equal(group.verbs))
 
+			clusterRole := &rbacv1.ClusterRole{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: groupClusterRoleName(group.name)}, clusterRole)).To(Succeed())
+			Expect(clusterRole.Rules[0].Resources).To(ContainElement("clusterworkflowtemplates"))
+			Expect(clusterRole.Rules[0].Verbs).To(Equal(group.clusterVerbs))
+
+			clusterBinding := &rbacv1.ClusterRoleBinding{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: groupClusterRoleName(group.name)}, clusterBinding)).To(Succeed())
+			Expect(clusterBinding.Subjects).To(ContainElement(rbacv1.Subject{Kind: "ServiceAccount", Name: group.name, Namespace: orchestrationv1alpha1.DefaultNamespace}))
+
 			token := &corev1.Secret{}
 			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: group.name + ".service-account-token", Namespace: orchestrationv1alpha1.DefaultNamespace}, token)).To(Succeed())
 			Expect(token.Type).To(Equal(corev1.SecretTypeServiceAccountToken))

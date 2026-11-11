@@ -46,6 +46,7 @@ func TestManagerRoleCoversGrantedRules(t *testing.T) {
 	}
 	for _, g := range groupAccounts() {
 		granted[g.name] = []rbacv1.PolicyRule{rule("argoproj.io", workflowResources(), g.verbs)}
+		granted[groupClusterRoleName(g.name)] = []rbacv1.PolicyRule{rule("argoproj.io", clusterWorkflowResources(), g.clusterVerbs)}
 	}
 
 	for role, rules := range granted {

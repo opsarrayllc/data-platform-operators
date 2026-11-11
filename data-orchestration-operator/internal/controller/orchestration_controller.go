@@ -61,7 +61,7 @@ type OrchestrationReconciler struct {
 // Kubernetes only lets the operator create a Role or ClusterRole whose rules
 // it already holds itself. The markers below cover everything granted in
 // argo.go: controllerClusterRules, serverClusterRules, the argo-role leader
-// election Role, and the per-group Roles. Keep them in sync when those change.
+// election Role, and the per-group Roles and ClusterRoles. Keep them in sync when those change.
 // +kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;create;update
 // +kubebuilder:rbac:groups="",resources=pods;pods/exec,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=pods/log,verbs=get;list;watch;delete
