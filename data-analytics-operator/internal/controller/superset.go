@@ -686,6 +686,37 @@ func writeTrinoOAuth2BasicAuth(b *strings.Builder) {
     TrinoEngineSpec.get_oauth2_token = classmethod(get_oauth2_token)
     TrinoEngineSpec.get_oauth2_fresh_token = classmethod(get_oauth2_fresh_token)
 `)
+	writeOAuth2CompletionTemplate(b)
+}
+
+// writeOAuth2CompletionTemplate replaces the page Superset shows at the end of
+// the per-user OAuth2 flow. Superset's own template runs an inline script
+// without the CSP nonce, so its Content-Security-Policy blocks it: the popup
+// never tells SQL Lab the token is ready and never closes. This copy carries
+// the nonce and is registered ahead of Superset's templates.
+func writeOAuth2CompletionTemplate(b *strings.Builder) {
+	b.WriteString(`
+    from jinja2 import ChoiceLoader, DictLoader
+
+    oauth2_page = """<!DOCTYPE html>
+<html>
+  <head><meta charset="utf-8"></head>
+  <body>
+    <script nonce="{{ csp_nonce() if csp_nonce is defined else '' }}">
+      if (window.opener) {
+        window.opener.postMessage({ tabId: '{{ tab_id }}' }, window.location.origin);
+      }
+      window.close();
+    </script>
+    <p>You can close this window and re-run the query.</p>
+  </body>
+</html>
+"""
+    app.jinja_env.loader = ChoiceLoader([
+        DictLoader({"superset/oauth2.html": oauth2_page}),
+        app.jinja_env.loader,
+    ])
+`)
 }
 
 // Superset OAuth provider names. Flask-AppBuilder has built-in user info
