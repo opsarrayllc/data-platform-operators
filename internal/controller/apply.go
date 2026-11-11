@@ -75,16 +75,20 @@ const (
 	secretTrinoCatalog             = "trino-catalog-lakekeeper"
 	secretTrinoConfig              = "trino-config"
 	secretTrinoInternal            = "trino-internal"
-	configMapSampleData            = "trino-sample-data"
-	secretSampleDataOIDC           = "trino-sample-data-oidc"
-	secretKeycloakAdmin            = "keycloak-admin"
-	secretOIDC                     = "oidc"
-	secretOpenFGA                  = "openfga"
-	configMapKeycloakRealm         = "keycloak-realm"
-	secretKeycloakRealmKey         = "keycloak-realm-key"
-	keyRealmPrivateKey             = "privateKey"
-	keyRealmCertificate            = "certificate"
-	keycloakAdminEmail             = "admin@local"
+	secretTrinoTLS                 = "trino-tls"
+	// configMapTrinoCA is the public CA clients use to verify Trino's HTTPS
+	// listener, such as the analytics operator's Superset.
+	configMapTrinoCA       = "trino-ca"
+	configMapSampleData    = "trino-sample-data"
+	secretSampleDataOIDC   = "trino-sample-data-oidc"
+	secretKeycloakAdmin    = "keycloak-admin"
+	secretOIDC             = "oidc"
+	secretOpenFGA          = "openfga"
+	configMapKeycloakRealm = "keycloak-realm"
+	secretKeycloakRealmKey = "keycloak-realm-key"
+	keyRealmPrivateKey     = "privateKey"
+	keyRealmCertificate    = "certificate"
+	keycloakAdminEmail     = "admin@local"
 	// oidcSubjectPrefix is how LakeKeeper namespaces user ids by identity provider.
 	oidcSubjectPrefix            = "oidc~"
 	catalogRelationAdmin         = "admin"
@@ -119,9 +123,12 @@ const (
 	keyKeycloakAdminUser         = "username"
 	keyKeycloakAdminPassword     = "password"
 	keyTrinoSharedSecret         = "sharedSecret"
+	keyTrinoCA                   = "ca.crt"
+	keyTrinoKeystore             = "keystore.pem"
 	keyOpenFGAAPIKey             = "apiKey"
 	keyRealmJSON                 = "realm.json"
 	portNameHTTP                 = "http"
+	portNameHTTPS                = "https"
 	portNameRPC                  = "rpc"
 	bindAllAddress               = "0.0.0.0"
 	sslModeDisable               = "disable"
@@ -141,6 +148,7 @@ const (
 	postgresPort                 = int32(5432)
 	lakekeeperPort               = int32(8181)
 	trinoPort                    = int32(8080)
+	trinoHTTPSPort               = int32(8443)
 	keycloakPort                 = int32(8080)
 	openfgaGRPCPort              = int32(8081)
 	openfgaHTTPPort              = int32(8080)

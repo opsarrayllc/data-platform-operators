@@ -89,22 +89,48 @@ func (s *TrinoSpec) HostOrDefault() string {
 	return stringOrDefault(s.Host, DefaultTrinoHost)
 }
 
-// PortOrDefault returns the Trino coordinator port.
-func (s *TrinoSpec) PortOrDefault() int32 {
-	if s.Port == 0 {
-		return DefaultTrinoPort
+// TrinoSchemeOrDefault returns the scheme Superset uses for Trino. With auth
+// enabled it defaults to https: Trino refuses authentication over plain HTTP.
+func (s *AnalyticsSpec) TrinoSchemeOrDefault() string {
+	if s.Trino.HTTPScheme != "" {
+		return s.Trino.HTTPScheme
 	}
-	return s.Port
+	if s.Auth.IsEnabled() {
+		return TrinoSchemeHTTPS
+	}
+	return DefaultTrinoScheme
+}
+
+// TrinoPortOrDefault returns the Trino coordinator port for the scheme.
+func (s *AnalyticsSpec) TrinoPortOrDefault() int32 {
+	if s.Trino.Port != 0 {
+		return s.Trino.Port
+	}
+	if s.TrinoSchemeOrDefault() == TrinoSchemeHTTPS {
+		return DefaultTrinoHTTPSPort
+	}
+	return DefaultTrinoPort
+}
+
+// TrinoCAOrDefault returns the CA ConfigMap to trust for Trino over https,
+// with unset fields defaulted, or nil over http.
+func (s *AnalyticsSpec) TrinoCAOrDefault() *ConfigMapKeyRef {
+	if s.TrinoSchemeOrDefault() != TrinoSchemeHTTPS {
+		return nil
+	}
+	ref := ConfigMapKeyRef{}
+	if s.Trino.CAConfigMapRef != nil {
+		ref = *s.Trino.CAConfigMapRef
+	}
+	ref.Name = stringOrDefault(ref.Name, DefaultTrinoCAConfigMap)
+	ref.Namespace = stringOrDefault(ref.Namespace, DefaultTrinoNamespace)
+	ref.Key = stringOrDefault(ref.Key, DefaultTrinoCAKey)
+	return &ref
 }
 
 // CatalogOrDefault returns the Trino catalog.
 func (s *TrinoSpec) CatalogOrDefault() string {
 	return stringOrDefault(s.Catalog, DefaultTrinoCatalog)
-}
-
-// SchemeOrDefault returns the Trino HTTP scheme.
-func (s *TrinoSpec) SchemeOrDefault() string {
-	return stringOrDefault(s.HTTPScheme, DefaultTrinoScheme)
 }
 
 // IsEnabled reports whether OIDC login is on. Nil defaults to false.

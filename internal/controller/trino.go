@@ -39,9 +39,19 @@ import (
 
 func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatformv1alpha1.DataLake, store objectStore, oidc oidcConfig, fga openfgaConfig) error {
 	ns := dp.Spec.Trino.NamespaceOrDefault()
-	dp.Status.TrinoEndpoint = clusterServiceURL(nameTrino, ns, trinoPort)
+	tls := trinoTLSEnabled(oidc)
+	dp.Status.TrinoEndpoint = trinoClientURL(ns, tls)
 
 	catalogData, catalogHash := r.trinoCatalogData(ctx, dp, store, oidc)
+
+	caPEM := ""
+	if tls {
+		var err error
+		if caPEM, err = r.ensureTrinoTLS(ctx, dp, ns); err != nil {
+			setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
+			return err
+		}
+	}
 
 	sharedSecret, err := r.trinoSharedSecret(ctx, dp, ns, oidc)
 	if err != nil {
@@ -55,7 +65,8 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 		opaURL = fga.opaURL
 	}
 	accessControl := trinoAccessControlProperties(opaURL, dp.Spec.Authz.HasRowFilters(), dp.Spec.Authz.HasColumnAccess())
-	cfgHash := hashData(coordCfg, workerCfg, catalogHash, accessControl)
+	// The CA changes whenever the keystore is regenerated.
+	cfgHash := hashData(coordCfg, workerCfg, catalogHash, accessControl, caPEM)
 
 	if err := r.applyTrinoConfigMap(ctx, dp, ns, coordCfg, workerCfg, accessControl); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -65,7 +76,7 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applyTrinoService(ctx, dp, ns); err != nil {
+	if err := r.applyTrinoService(ctx, dp, ns, tls); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -81,7 +92,7 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 			return err
 		}
 	}
-	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != "", oidc.serviceAccounts); err != nil {
+	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != "", tls, oidc.serviceAccounts); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -122,12 +133,31 @@ func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extr
 	oauthUI := trinoUIAuthEnabled(oidc, publicURL)
 	if coordinator && oauthSQL {
 		maps.Copy(props, trinoOAuthProperties(oidc, oauthUI))
+		// Trino authenticates clients only over HTTPS (or HTTP that a
+		// TLS-terminating proxy marks with X-Forwarded-Proto: https).
+		props["http-server.https.enabled"] = strconv.FormatBool(true)
+		props["http-server.https.port"] = strconv.Itoa(int(trinoHTTPSPort))
+		props["http-server.https.keystore.path"] = trinoTLSDir + "/" + keyTrinoKeystore
 	}
 	if sharedSecret != "" {
 		props["internal-communication.shared-secret"] = sharedSecret
 	}
 	maps.Copy(props, extra)
 	return renderProperties(props)
+}
+
+// trinoTLSEnabled gives the coordinator an HTTPS listener whenever clients
+// authenticate, since Trino refuses authentication over plain HTTP.
+func trinoTLSEnabled(oidc oidcConfig) bool {
+	return trinoOAuthEnabled(oidc)
+}
+
+// trinoClientURL is where clients inside the cluster reach the coordinator.
+func trinoClientURL(ns string, tls bool) string {
+	if tls {
+		return fmt.Sprintf("https://%s.%s.svc:%d", nameTrino, ns, trinoHTTPSPort)
+	}
+	return clusterServiceURL(nameTrino, ns, trinoPort)
 }
 
 func trinoUIAuthEnabled(oidc oidcConfig, publicURL string) bool {
@@ -167,8 +197,11 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 		issuer = oidc.publicIssuer
 	}
 	props := map[string]string{
-		"http-server.authentication.type":                        authTypeOAuth2,
-		"http-server.authentication.allow-insecure-over-http":    "true",
+		"http-server.authentication.type": authTypeOAuth2,
+		// Plain HTTP would otherwise fall back to the insecure authenticator,
+		// which takes the user name from X-Trino-User without checking it.
+		// Worker traffic is internal and authenticated with the shared secret.
+		"http-server.authentication.allow-insecure-over-http":    "false",
 		"http-server.authentication.oauth2.issuer":               issuer,
 		"http-server.authentication.oauth2.client-id":            oidc.trinoClientID,
 		"http-server.authentication.oauth2.client-secret":        oidc.trinoSecret,
@@ -332,6 +365,7 @@ func (r *DataLakeReconciler) applyTrinoService(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataLake,
 	ns string,
+	tls bool,
 ) error {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameTrino, Namespace: ns}}
 	labels := labelsFor(dp, componentTrinoCoordinator)
@@ -344,6 +378,13 @@ func (r *DataLakeReconciler) applyTrinoService(
 			Port:       trinoPort,
 			TargetPort: intstr.FromInt32(trinoPort),
 		}}
+		if tls {
+			svc.Spec.Ports = append(svc.Spec.Ports, corev1.ServicePort{
+				Name:       portNameHTTPS,
+				Port:       trinoHTTPSPort,
+				TargetPort: intstr.FromInt32(trinoHTTPSPort),
+			})
+		}
 		return nil
 	})
 }
@@ -352,7 +393,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
-	oauth, opa bool,
+	oauth, opa, tls bool,
 	sa serviceAccountTokens,
 ) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameTrino, Namespace: ns}}
@@ -375,6 +416,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 			dp.Spec.Trino.ExtraEnv,
 			oauth,
 			opa,
+			tls,
 			sa,
 		)
 		return nil
@@ -421,6 +463,7 @@ func (r *DataLakeReconciler) reconcileTrinoWorkers(
 			dp.Spec.Trino.ExtraEnv,
 			false,
 			false,
+			false,
 			sa,
 		)
 		return nil
@@ -433,7 +476,7 @@ func trinoPodSpec(
 	image, configKey string,
 	resources corev1.ResourceRequirements,
 	env []corev1.EnvVar,
-	oauth, opa bool,
+	oauth, opa, tls bool,
 	sa serviceAccountTokens,
 ) corev1.PodSpec {
 	probe := corev1.ProbeHandler{
@@ -458,13 +501,39 @@ func trinoPodSpec(
 			SubPath:   "access-control.properties",
 		})
 	}
+	ports := []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: trinoPort}}
+	volumes := []corev1.Volume{
+		{
+			Name: volumeConfig,
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretTrinoConfig},
+			},
+		},
+		{
+			Name: "catalog",
+			VolumeSource: corev1.VolumeSource{
+				Secret: &corev1.SecretVolumeSource{SecretName: secretTrinoCatalog},
+			},
+		},
+	}
+	if tls {
+		ports = append(ports, corev1.ContainerPort{Name: portNameHTTPS, ContainerPort: trinoHTTPSPort})
+		mounts = append(mounts, corev1.VolumeMount{Name: volumeTrinoTLS, MountPath: trinoTLSDir, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeTrinoTLS,
+			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
+				SecretName: secretTrinoTLS,
+				Items:      []corev1.KeyToPath{{Key: keyTrinoKeystore, Path: keyTrinoKeystore}},
+			}},
+		})
+	}
 	spec := corev1.PodSpec{
 		ServiceAccountName: nameTrino,
 		SecurityContext:    restrictedPodSecurity(uidTrino, gidTrino),
 		Containers: []corev1.Container{{
 			Name:         nameTrino,
 			Image:        image,
-			Ports:        []corev1.ContainerPort{{Name: portNameHTTP, ContainerPort: trinoPort}},
+			Ports:        ports,
 			Env:          env,
 			VolumeMounts: mounts,
 			ReadinessProbe: &corev1.Probe{
@@ -474,20 +543,7 @@ func trinoPodSpec(
 			Resources:       resources,
 			SecurityContext: restrictedContainerSecurity(uidTrino, gidTrino),
 		}},
-		Volumes: []corev1.Volume{
-			{
-				Name: volumeConfig,
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{SecretName: secretTrinoConfig},
-				},
-			},
-			{
-				Name: "catalog",
-				VolumeSource: corev1.VolumeSource{
-					Secret: &corev1.SecretVolumeSource{SecretName: secretTrinoCatalog},
-				},
-			},
-		},
+		Volumes: volumes,
 	}
 	if sa.enabled {
 		withTokenProxy(&spec, sa)

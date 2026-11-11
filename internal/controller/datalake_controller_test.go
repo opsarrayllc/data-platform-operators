@@ -228,6 +228,17 @@ var _ = Describe("DataLake Controller", func() {
 		// Auth is enabled, so Trino accepts Bearer tokens even without a public UI URL.
 		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("http-server.authentication.type=oauth2"))
 		Expect(string(cfg.Data["config.properties.coordinator"])).NotTo(ContainSubstring("web-ui.authentication.type=oauth2"))
+
+		By("serving clients over HTTPS only, with a CA they can trust")
+		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("http-server.authentication.allow-insecure-over-http=false\n"))
+		Expect(string(cfg.Data["config.properties.coordinator"])).To(ContainSubstring("http-server.https.port=8443\n"))
+		tlsSecret := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoTLS, Namespace: nameTrino}, tlsSecret)).To(Succeed())
+		caCM := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTrinoCA, Namespace: nameTrino}, caCM)).To(Succeed())
+		Expect(caCM.Data[keyTrinoCA]).To(Equal(string(tlsSecret.Data[keyTrinoCA])))
+		Expect(svc.Spec.Ports).To(ContainElement(HaveField("Port", trinoHTTPSPort)))
+		Expect(deploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(HaveField("MountPath", trinoTLSDir)))
 		Expect(string(cfg.Data["config.properties.worker"])).To(ContainSubstring("discovery.uri=http://trino.trino.svc:8080"))
 		Expect(string(cfg.Data["access-control.properties"])).To(ContainSubstring("access-control.name=opa"))
 		Expect(string(cfg.Data["access-control.properties"])).To(ContainSubstring("http://opa.openfga.svc:8181/v1/data/trino/allow"))
@@ -286,7 +297,7 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())
 		Expect(updated.Status.MinioEndpoint).To(Equal("http://minio.minio.svc:9000"))
 		Expect(updated.Status.LakekeeperEndpoint).To(Equal("http://lakekeeper.lakekeeper.svc:8181"))
-		Expect(updated.Status.TrinoEndpoint).To(Equal("http://trino.trino.svc:8080"))
+		Expect(updated.Status.TrinoEndpoint).To(Equal("https://trino.trino.svc:8443"))
 		Expect(updated.Status.KeycloakEndpoint).To(Equal("http://keycloak.keycloak.svc:8080"))
 		Expect(updated.Status.OpenFGAEndpoint).To(Equal("http://openfga.openfga.svc:8081"))
 	})

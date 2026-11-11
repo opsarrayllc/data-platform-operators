@@ -498,6 +498,24 @@ spec:
               trino:
                 description: trino is the query engine Superset connects to.
                 properties:
+                  caConfigMapRef:
+                    description: |-
+                      caConfigMapRef locates the CA certificate that signs Trino's HTTPS
+                      certificate. With https the operator copies it into the Superset
+                      namespace and Superset verifies Trino against it. Defaults to the data
+                      lake operator's trino-ca ConfigMap (key ca.crt) in the trino namespace.
+                    properties:
+                      key:
+                        description: key holding the PEM certificate. Defaults to
+                          ca.crt.
+                        type: string
+                      name:
+                        description: name of the ConfigMap.
+                        type: string
+                      namespace:
+                        description: namespace of the ConfigMap. Defaults to trino.
+                        type: string
+                    type: object
                   catalog:
                     description: catalog is the Trino catalog Superset queries. Defaults
                       to lakekeeper.
@@ -507,10 +525,16 @@ spec:
                       to trino.trino.svc.
                     type: string
                   httpScheme:
-                    description: httpScheme is http or https. Defaults to http.
+                    description: |-
+                      httpScheme is http or https. Defaults to https when auth is enabled,
+                      because Trino only authenticates users over HTTPS, and http otherwise.
+                    enum:
+                    - http
+                    - https
                     type: string
                   port:
-                    description: port is the coordinator HTTP port. Defaults to 8080.
+                    description: port is the coordinator port. Defaults to 8443 for
+                      https and 8080 for http.
                     format: int32
                     type: integer
                 type: object

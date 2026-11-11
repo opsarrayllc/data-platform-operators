@@ -24,8 +24,10 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
 
@@ -42,6 +44,11 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 	a.Status.SupersetEndpoint = clusterServiceURL(nameSuperset, ns, supersetPort)
 
 	if err := r.ensureSupersetSecrets(ctx, a, ns, oidc); err != nil {
+		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
+	caPEM, err := r.ensureTrinoCA(ctx, a, ns)
+	if err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -66,7 +73,7 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applySupersetDeployment(ctx, a, ns, conn, hashData(cfgHash, bootstrap, conn.CredentialsHash)); err != nil {
+	if err := r.applySupersetDeployment(ctx, a, ns, conn, caPEM != "", hashData(cfgHash, bootstrap, conn.CredentialsHash, caPEM)); err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -112,6 +119,36 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 	}
 	setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionTrue, reasonReady, "Superset is ready")
 	return nil
+}
+
+// ensureTrinoCA copies the CA that signs Trino's HTTPS certificate into the
+// Superset namespace, so the pod can mount it. It returns the PEM, or "" when
+// Superset reaches Trino over plain HTTP.
+func (r *AnalyticsReconciler) ensureTrinoCA(ctx context.Context, a *analyticsv1alpha1.Analytics, ns string) (string, error) {
+	ref := a.Spec.TrinoCAOrDefault()
+	if ref == nil {
+		return "", nil
+	}
+	src := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Name: ref.Name, Namespace: ref.Namespace}, src); err != nil {
+		if errors.IsNotFound(err) {
+			return "", fmt.Errorf("trino CA ConfigMap %s/%s not found: the data lake operator publishes it once Trino serves HTTPS, or set spec.trino.caConfigMapRef", ref.Namespace, ref.Name)
+		}
+		return "", err
+	}
+	caPEM := src.Data[ref.Key]
+	if caPEM == "" {
+		return "", fmt.Errorf("trino CA ConfigMap %s/%s has no key %s", ref.Namespace, ref.Name, ref.Key)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapTrinoCA, Namespace: ns}}
+	if err := r.apply(ctx, a, cm, func() error {
+		ensureLabels(cm, labelsFor(a, componentSuperset))
+		cm.Data = map[string]string{keyTrinoCA: caPEM}
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	return caPEM, nil
 }
 
 func (r *AnalyticsReconciler) ensureSupersetSecrets(
@@ -319,6 +356,7 @@ func (r *AnalyticsReconciler) applySupersetDeployment(
 	a *analyticsv1alpha1.Analytics,
 	ns string,
 	conn postgresConn,
+	trinoCA bool,
 	cfgHash string,
 ) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameSuperset, Namespace: ns}}
@@ -411,10 +449,7 @@ func (r *AnalyticsReconciler) applySupersetDeployment(
 					},
 				},
 			}, append(supersetDatabaseEnv(conn), a.Spec.ExtraEnv...)...),
-			VolumeMounts: []corev1.VolumeMount{{
-				Name:      volumeConfig,
-				MountPath: "/app/pythonpath",
-			}},
+			VolumeMounts: supersetVolumeMounts(trinoCA),
 			ReadinessProbe: &corev1.Probe{
 				ProbeHandler: corev1.ProbeHandler{
 					HTTPGet: &corev1.HTTPGetAction{
@@ -428,16 +463,39 @@ func (r *AnalyticsReconciler) applySupersetDeployment(
 			Resources:       a.Spec.Resources,
 			SecurityContext: restrictedContainerSecurity(uidSuperset, gidSuperset),
 		}}
-		deploy.Spec.Template.Spec.Volumes = []corev1.Volume{{
-			Name: volumeConfig,
-			VolumeSource: corev1.VolumeSource{
-				ConfigMap: &corev1.ConfigMapVolumeSource{
-					LocalObjectReference: corev1.LocalObjectReference{Name: configMapSuperset},
-				},
-			},
-		}}
+		deploy.Spec.Template.Spec.Volumes = supersetVolumes(trinoCA)
 		return nil
 	})
+}
+
+func supersetVolumeMounts(trinoCA bool) []corev1.VolumeMount {
+	mounts := []corev1.VolumeMount{{Name: volumeConfig, MountPath: "/app/pythonpath"}}
+	if trinoCA {
+		mounts = append(mounts, corev1.VolumeMount{Name: volumeTrinoCA, MountPath: trinoCADir, ReadOnly: true})
+	}
+	return mounts
+}
+
+func supersetVolumes(trinoCA bool) []corev1.Volume {
+	volumes := []corev1.Volume{{
+		Name: volumeConfig,
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: configMapSuperset},
+			},
+		},
+	}}
+	if trinoCA {
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeTrinoCA,
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapTrinoCA},
+				},
+			},
+		})
+	}
+	return volumes
 }
 
 func supersetConfig(
@@ -445,7 +503,7 @@ func supersetConfig(
 	oidc oidcConfig,
 ) (string, string) {
 	redisURL := fmt.Sprintf("redis://%s:%d/0", nameSupersetRedis, redisPort)
-	trinoURI := fmt.Sprintf("trino://%s:%d/%s", a.Spec.Trino.HostOrDefault(), a.Spec.Trino.PortOrDefault(), a.Spec.Trino.CatalogOrDefault())
+	trinoURI := fmt.Sprintf("trino://%s:%d/%s", a.Spec.Trino.HostOrDefault(), a.Spec.TrinoPortOrDefault(), a.Spec.Trino.CatalogOrDefault())
 
 	publicURL := strings.TrimRight(a.Spec.PublicURL, "/")
 	authURL := oidc.authURL
@@ -546,6 +604,12 @@ func supersetConfig(
 		b.WriteString("    import base64, json\n")
 		b.WriteString("    connect_args = params.setdefault(\"connect_args\", {})\n")
 		b.WriteString("    session = connect_args.get(\"http_session\")\n")
+		// The Trino client only applies verify to sessions it creates, so
+		// the per-user session Superset builds for OAuth tokens would check
+		// Trino's certificate against the system CAs instead of Trino's CA.
+		b.WriteString("    verify = connect_args.get(\"verify\")\n")
+		b.WriteString("    if session is not None and verify is not None:\n")
+		b.WriteString("        session.verify = verify\n")
 		b.WriteString("    auth = None\n")
 		b.WriteString("    if session is not None:\n")
 		b.WriteString("        auth = session.headers.get(\"Authorization\") or session.headers.get(\"authorization\")\n")
@@ -622,8 +686,8 @@ CUSTOM_SECURITY_MANAGER = OIDCSecurityManager
 }
 
 func supersetBootstrapTrino(a *analyticsv1alpha1.Analytics) string {
-	trinoURI := fmt.Sprintf("trino://%s:%d/%s", a.Spec.Trino.HostOrDefault(), a.Spec.Trino.PortOrDefault(), a.Spec.Trino.CatalogOrDefault())
-	scheme := a.Spec.Trino.SchemeOrDefault()
+	trinoURI := fmt.Sprintf("trino://%s:%d/%s", a.Spec.Trino.HostOrDefault(), a.Spec.TrinoPortOrDefault(), a.Spec.Trino.CatalogOrDefault())
+	scheme := a.Spec.TrinoSchemeOrDefault()
 	var b strings.Builder
 	b.WriteString("# Generated by data-analytics-operator. Seeds the Trino database.\n")
 	b.WriteString("from superset.app import create_app\n\n")
@@ -647,6 +711,11 @@ func supersetBootstrapTrino(a *analyticsv1alpha1.Analytics) string {
 	b.WriteString("    engine_params = extra.get(\"engine_params\") or {}\n")
 	b.WriteString("    connect_args = engine_params.get(\"connect_args\") or {}\n")
 	b.WriteString(fmt.Sprintf("    connect_args[\"http_scheme\"] = %q\n", scheme))
+	if a.Spec.TrinoCAOrDefault() != nil {
+		b.WriteString(fmt.Sprintf("    connect_args[\"verify\"] = %q\n", trinoCADir+"/"+keyTrinoCA))
+	} else {
+		b.WriteString("    connect_args.pop(\"verify\", None)\n")
+	}
 	b.WriteString("    engine_params[\"connect_args\"] = connect_args\n")
 	b.WriteString("    extra[\"engine_params\"] = engine_params\n")
 	b.WriteString("    database.extra = __import__(\"json\").dumps(extra)\n")

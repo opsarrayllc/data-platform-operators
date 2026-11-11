@@ -41,10 +41,19 @@ const (
 	// make kind-up builds and loads the same tag locally.
 	DefaultImage = "ghcr.io/opsarrayllc/data-platform-superset:5.0.0"
 
-	DefaultTrinoHost    = "trino.trino.svc"
-	DefaultTrinoPort    = int32(8080)
-	DefaultTrinoCatalog = "lakekeeper"
-	DefaultTrinoScheme  = "http"
+	DefaultTrinoHost = "trino.trino.svc"
+	DefaultTrinoPort = int32(8080)
+	// DefaultTrinoHTTPSPort is the data lake operator's HTTPS listener, which
+	// Trino has whenever the lake has an identity provider.
+	DefaultTrinoHTTPSPort = int32(8443)
+	// DefaultTrinoCAConfigMap is the CA ConfigMap the data lake operator
+	// publishes next to Trino.
+	DefaultTrinoCAConfigMap = "trino-ca"
+	DefaultTrinoNamespace   = "trino"
+	DefaultTrinoCAKey       = "ca.crt"
+	DefaultTrinoCatalog     = "lakekeeper"
+	DefaultTrinoScheme      = "http"
+	TrinoSchemeHTTPS        = "https"
 
 	// Group names match the groups the data lake operator imports into Keycloak.
 	DefaultGroupPlatformAdmins = "platform-admins"
@@ -194,7 +203,7 @@ type TrinoSpec struct {
 	// +optional
 	Host string `json:"host,omitempty"`
 
-	// port is the coordinator HTTP port. Defaults to 8080.
+	// port is the coordinator port. Defaults to 8443 for https and 8080 for http.
 	// +optional
 	Port int32 `json:"port,omitempty"`
 
@@ -202,9 +211,30 @@ type TrinoSpec struct {
 	// +optional
 	Catalog string `json:"catalog,omitempty"`
 
-	// httpScheme is http or https. Defaults to http.
+	// httpScheme is http or https. Defaults to https when auth is enabled,
+	// because Trino only authenticates users over HTTPS, and http otherwise.
 	// +optional
+	// +kubebuilder:validation:Enum=http;https
 	HTTPScheme string `json:"httpScheme,omitempty"`
+	// caConfigMapRef locates the CA certificate that signs Trino's HTTPS
+	// certificate. With https the operator copies it into the Superset
+	// namespace and Superset verifies Trino against it. Defaults to the data
+	// lake operator's trino-ca ConfigMap (key ca.crt) in the trino namespace.
+	// +optional
+	CAConfigMapRef *ConfigMapKeyRef `json:"caConfigMapRef,omitempty"`
+}
+
+// ConfigMapKeyRef selects a key of a ConfigMap in any namespace.
+type ConfigMapKeyRef struct {
+	// name of the ConfigMap.
+	// +optional
+	Name string `json:"name,omitempty"`
+	// namespace of the ConfigMap. Defaults to trino.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+	// key holding the PEM certificate. Defaults to ca.crt.
+	// +optional
+	Key string `json:"key,omitempty"`
 }
 
 // AuthSpec configures Superset login.
