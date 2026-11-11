@@ -38,6 +38,10 @@ type groupAccess struct {
 	rule       string
 	precedence string
 	verbs      []string
+	// clusterVerbs apply to cluster-scoped resources such as
+	// ClusterWorkflowTemplates, which every namespace shares, so only
+	// platform admins may change them.
+	clusterVerbs []string
 }
 
 func groupAccounts() []groupAccess {
@@ -45,14 +49,27 @@ func groupAccounts() []groupAccess {
 	write := []string{"get", "list", "watch", "create", "update", "patch"}
 	admin := []string{"get", "list", "watch", "create", "update", "patch", "delete"}
 	return []groupAccess{
-		{orchestrationv1alpha1.DefaultGroupPlatformAdmins, "'platform-admins' in groups", "30", admin},
-		{orchestrationv1alpha1.DefaultGroupDataEngineers, "'data-engineers' in groups", "20", write},
-		{orchestrationv1alpha1.DefaultGroupAnalysts, "'analysts' in groups", "10", read},
+		{orchestrationv1alpha1.DefaultGroupPlatformAdmins, "'platform-admins' in groups", "30", admin, admin},
+		{orchestrationv1alpha1.DefaultGroupDataEngineers, "'data-engineers' in groups", "20", write, read},
+		{orchestrationv1alpha1.DefaultGroupAnalysts, "'analysts' in groups", "10", read, read},
 	}
 }
 
 func workflowResources() []string {
-	return []string{"workflows", "workflowtemplates", "cronworkflows", "workflowtaskresults"}
+	return []string{"workflows", "workflowtemplates", "cronworkflows", "workflowtaskresults", "workfloweventbindings", "eventsources", "sensors"}
+}
+
+// clusterWorkflowResources are the cluster-scoped Argo resources the UI lists
+// next to the namespaced ones (the Workflow Templates page also lists
+// ClusterWorkflowTemplates), so each group needs a ClusterRole for them.
+func clusterWorkflowResources() []string {
+	return []string{"clusterworkflowtemplates"}
+}
+
+// groupClusterRoleName is the name of a group's ClusterRole and
+// ClusterRoleBinding. Prefixed because cluster-scoped names are global.
+func groupClusterRoleName(group string) string {
+	return "argo-" + group
 }
 
 func (r *OrchestrationReconciler) applyPriorityClass(ctx context.Context, o *orchestrationv1alpha1.Orchestration) error {
@@ -164,6 +181,23 @@ func (r *OrchestrationReconciler) applyGroupAccess(ctx context.Context, o *orche
 			ensureLabels(binding, labelsFor(o, componentArgo))
 			binding.RoleRef = rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "Role", Name: role.Name}
 			binding.Subjects = []rbacv1.Subject{{Kind: "ServiceAccount", Name: group.name, Namespace: ns}}
+			return nil
+		}); err != nil {
+			return err
+		}
+		clusterRole := &rbacv1.ClusterRole{ObjectMeta: metav1.ObjectMeta{Name: groupClusterRoleName(group.name)}}
+		if err := r.apply(ctx, o, clusterRole, func() error {
+			ensureLabels(clusterRole, labelsFor(o, componentArgo))
+			clusterRole.Rules = []rbacv1.PolicyRule{rule("argoproj.io", clusterWorkflowResources(), group.clusterVerbs)}
+			return nil
+		}); err != nil {
+			return err
+		}
+		clusterBinding := &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: clusterRole.Name}}
+		if err := r.apply(ctx, o, clusterBinding, func() error {
+			ensureLabels(clusterBinding, labelsFor(o, componentArgo))
+			clusterBinding.RoleRef = rbacv1.RoleRef{APIGroup: rbacv1.GroupName, Kind: "ClusterRole", Name: clusterRole.Name}
+			clusterBinding.Subjects = []rbacv1.Subject{{Kind: "ServiceAccount", Name: group.name, Namespace: ns}}
 			return nil
 		}); err != nil {
 			return err
