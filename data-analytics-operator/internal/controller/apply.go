@@ -60,6 +60,11 @@ const (
 	secretSuperset         = "superset"
 	secretSupersetOIDC     = "superset-oidc"
 	configMapSuperset      = "superset-config"
+	// configMapTrinoCA is the copy of Trino's CA in the Superset namespace.
+	configMapTrinoCA = "trino-ca"
+	keyTrinoCA       = "ca.crt"
+	volumeTrinoCA    = "trino-ca"
+	trinoCADir       = "/app/trino-ca"
 
 	keyPostgresUsername         = "username"
 	keyPostgresPassword         = "password"

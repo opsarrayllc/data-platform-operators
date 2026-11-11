@@ -34,6 +34,7 @@ import (
 const (
 	sampleDataSQLKey    = "sample.sql"
 	sampleDataScriptKey = "seed.py"
+	sampleDataCADir     = "/etc/trino-ca"
 	sampleDataMountPath = "/sample"
 	sampleDataHashAnno  = "dataplatform.opsarray.io/sample-data-hash"
 	uidSampleData       = int64(65532)
@@ -128,9 +129,38 @@ func (r *DataLakeReconciler) ensureSampleDataJob(
 		return false, err
 	}
 
+	tls := needsOAuth
 	env := []corev1.EnvVar{
-		{Name: "TRINO_URL", Value: clusterServiceURL(nameTrino, ns, trinoPort)},
+		{Name: "TRINO_URL", Value: trinoClientURL(ns, tls)},
 		{Name: "SQL_FILE", Value: sampleDataMountPath + "/" + sampleDataSQLKey},
+	}
+	mounts := []corev1.VolumeMount{{
+		Name:      "sample",
+		MountPath: sampleDataMountPath,
+		ReadOnly:  true,
+	}}
+	volumes := []corev1.Volume{{
+		Name: "sample",
+		VolumeSource: corev1.VolumeSource{
+			ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: configMapSampleData},
+				DefaultMode:          ptr.To(int32(0444)),
+			},
+		},
+	}}
+	if tls {
+		// urllib's default context verifies against SSL_CERT_FILE. The seed
+		// only talks HTTPS to Trino, so the Trino CA alone is enough.
+		env = append(env, corev1.EnvVar{Name: "SSL_CERT_FILE", Value: sampleDataCADir + "/" + keyTrinoCA})
+		mounts = append(mounts, corev1.VolumeMount{Name: "trino-ca", MountPath: sampleDataCADir, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: "trino-ca",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{Name: configMapTrinoCA},
+				},
+			},
+		})
 	}
 	if needsOAuth {
 		if err := r.ensureSampleDataOIDCSecret(ctx, dp, ns); err != nil {
@@ -177,22 +207,10 @@ func (r *DataLakeReconciler) ensureSampleDataJob(
 						ImagePullPolicy: corev1.PullIfNotPresent,
 						Command:         []string{"python3", sampleDataMountPath + "/" + sampleDataScriptKey},
 						Env:             env,
-						VolumeMounts: []corev1.VolumeMount{{
-							Name:      "sample",
-							MountPath: sampleDataMountPath,
-							ReadOnly:  true,
-						}},
+						VolumeMounts:    mounts,
 						SecurityContext: restrictedContainerSecurity(uidSampleData, gidSampleData),
 					}},
-					Volumes: []corev1.Volume{{
-						Name: "sample",
-						VolumeSource: corev1.VolumeSource{
-							ConfigMap: &corev1.ConfigMapVolumeSource{
-								LocalObjectReference: corev1.LocalObjectReference{Name: configMapSampleData},
-								DefaultMode:          ptr.To(int32(0444)),
-							},
-						},
-					}},
+					Volumes: volumes,
 				},
 			},
 		},

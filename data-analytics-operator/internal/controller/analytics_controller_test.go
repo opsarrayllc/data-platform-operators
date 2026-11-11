@@ -62,6 +62,17 @@ var _ = Describe("Analytics Controller", func() {
 			Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 		}
 
+		// The data lake operator publishes Trino's CA here once Trino serves HTTPS.
+		trinoNS := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: analyticsv1alpha1.DefaultTrinoNamespace}}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: trinoNS.Name}, trinoNS); errors.IsNotFound(err) {
+			Expect(k8sClient.Create(ctx, trinoNS)).To(Succeed())
+		}
+		trinoCA := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: analyticsv1alpha1.DefaultTrinoCAConfigMap, Namespace: trinoNS.Name}}
+		if err := k8sClient.Get(ctx, types.NamespacedName{Name: trinoCA.Name, Namespace: trinoCA.Namespace}, trinoCA); errors.IsNotFound(err) {
+			trinoCA.Data = map[string]string{analyticsv1alpha1.DefaultTrinoCAKey: testTrinoCA}
+			Expect(k8sClient.Create(ctx, trinoCA)).To(Succeed())
+		}
+
 		existing := &analyticsv1alpha1.Analytics{}
 		err = k8sClient.Get(ctx, key, existing)
 		if errors.IsNotFound(err) {
@@ -129,7 +140,16 @@ var _ = Describe("Analytics Controller", func() {
 		Expect(supersetCM.Data[supersetConfigKey]).NotTo(ContainSubstring(string(pgSecret.Data[keyPostgresPassword])))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("database_name=name"))
 		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("impersonate_user = True"))
-		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("trino://trino.trino.svc:8080/lakekeeper"))
+		By("reaching Trino over HTTPS, verified against the data lake's CA")
+		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring("trino://trino.trino.svc:8443/lakekeeper"))
+		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`connect_args["http_scheme"] = "https"`))
+		Expect(supersetCM.Data[supersetBootstrapKey]).To(ContainSubstring(`connect_args["verify"] = "/app/trino-ca/ca.crt"`))
+		// Superset's per-user OAuth session must verify against the same CA.
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("session.verify = verify"))
+		caCopy := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTrinoCA, Namespace: nameSuperset}, caCopy)).To(Succeed())
+		Expect(caCopy.Data[keyTrinoCA]).To(Equal(testTrinoCA))
+		Expect(deploy.Spec.Template.Spec.Containers[0].VolumeMounts).To(ContainElement(HaveField("MountPath", trinoCADir)))
 
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretSupersetOIDC, Namespace: nameSuperset}, &corev1.Secret{})).To(Succeed())
 
@@ -221,3 +241,5 @@ func envSecretName(env []corev1.EnvVar, name string) string {
 	}
 	return ""
 }
+
+const testTrinoCA = "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----\n"
