@@ -718,8 +718,10 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "debezium-orders-db", Namespace: nameDebezium}, deploy)).To(Succeed())
 		Expect(deploy.Spec.Strategy.Type).To(Equal(appsv1.RecreateDeploymentStrategyType))
 		Expect(deploy.Spec.Selector.MatchLabels).To(HaveKeyWithValue(labelDebeziumSource, "orders-db"))
+		Expect(deploy.Spec.Template.Annotations).To(HaveKeyWithValue(annotationDoNotDisrupt, "true"))
 		pod := deploy.Spec.Template.Spec
 		Expect(pod.ServiceAccountName).To(Equal(nameDebezium))
+		Expect(pod.TerminationGracePeriodSeconds).To(HaveValue(Equal(debeziumTerminationGracePeriod)))
 		Expect(pod.Containers).To(HaveLen(2))
 		Expect(pod.Containers[0].Image).To(Equal(dataplatformv1alpha1.DefaultDebeziumImage))
 		Expect(pod.Containers[0].Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("debezium-orders-db-credentials"))

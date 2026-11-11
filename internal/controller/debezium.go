@@ -48,15 +48,22 @@ const (
 	keyDebeziumConfig   = "application.properties"
 	// envDebeziumUser and envDebeziumPassword hold the source login. The
 	// properties file refers to them, so the password never lands in it.
-	envDebeziumUser        = "DEBEZIUM_SOURCE_DATABASE_USER"
-	envDebeziumPassword    = "DEBEZIUM_SOURCE_DATABASE_PASSWORD"
-	debeziumConfigDir      = "/debezium/config"
-	debeziumDataDir        = "/debezium/data"
-	debeziumHTTPPort       = int32(8080)
-	debeziumManagementPort = int32(9000)
-	portNameManagement     = "management"
-	uidDebezium            = int64(185)
-	gidDebezium            = int64(185)
+	envDebeziumUser     = "DEBEZIUM_SOURCE_DATABASE_USER"
+	envDebeziumPassword = "DEBEZIUM_SOURCE_DATABASE_PASSWORD"
+	debeziumConfigDir   = "/debezium/config"
+	debeziumDataDir     = "/debezium/data"
+	debeziumHTTPPort    = int32(8080)
+	// annotationDoNotDisrupt stops Karpenter consolidating a running engine.
+	// An engine stopped mid-batch can leave the replication slot confirmed
+	// past its stored offset, and each restart replays from that offset.
+	annotationDoNotDisrupt = "karpenter.sh/do-not-disrupt"
+	// debeziumTerminationGracePeriod gives the engine time to commit its
+	// last batch and offsets to Iceberg on shutdown.
+	debeziumTerminationGracePeriod = int64(120)
+	debeziumManagementPort         = int32(9000)
+	portNameManagement             = "management"
+	uidDebezium                    = int64(185)
+	gidDebezium                    = int64(185)
 	// debeziumServerIDBase keeps derived MySQL server ids clear of the small
 	// numbers replicas usually take.
 	debeziumServerIDBase  = 5400
@@ -246,6 +253,7 @@ func (r *DataLakeReconciler) reconcileDebeziumSource(
 			deploy.Spec.Template.Annotations = map[string]string{}
 		}
 		deploy.Spec.Template.Annotations[annotationConfigHash] = cfgHash
+		deploy.Spec.Template.Annotations[annotationDoNotDisrupt] = strconv.FormatBool(true)
 		deploy.Spec.Template.Labels = labels
 		deploy.Spec.Template.Spec = debeziumPodSpec(dp.Spec.Debezium.ImageOrDefault(), src, oidc.serviceAccounts)
 		return nil
@@ -280,8 +288,9 @@ func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec,
 		}}
 	}
 	spec := corev1.PodSpec{
-		ServiceAccountName: nameDebezium,
-		SecurityContext:    restrictedPodSecurity(uidDebezium, gidDebezium),
+		ServiceAccountName:            nameDebezium,
+		SecurityContext:               restrictedPodSecurity(uidDebezium, gidDebezium),
+		TerminationGracePeriodSeconds: ptr.To(debeziumTerminationGracePeriod),
 		Containers: []corev1.Container{{
 			Name:  nameDebezium,
 			Image: image,
@@ -396,6 +405,12 @@ func debeziumProperties(
 		// "filtered" needs table ownership rather than superuser, which managed
 		// Postgres (RDS, Cloud SQL) does not hand out.
 		props["debezium.source.publication.autocreate.mode"] = "filtered"
+		// The slot is confirmed as events reach Iceberg, but the offset is
+		// stored only periodically, so after an unclean stop the slot can be
+		// ahead of the offset. The default (no_validation) then fails on every
+		// start asking for WAL the slot has released; resume from whichever
+		// position is further along instead.
+		props["debezium.source.offset.mismatch.strategy"] = "trust_greater_lsn"
 	case dataplatformv1alpha1.DebeziumConnectorSQLServer:
 		props["debezium.source.database.names"] = src.Database
 	}
