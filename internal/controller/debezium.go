@@ -68,6 +68,10 @@ const (
 	// numbers replicas usually take.
 	debeziumServerIDBase  = 5400
 	debeziumServerIDRange = 100000
+	// debeziumHeartbeatPrefix tags the logical decoding messages Postgres
+	// heartbeats write to keep the replication slot moving.
+	debeziumHeartbeatPrefix     = "debezium-heartbeat"
+	debeziumHeartbeatIntervalMS = "60000"
 	// propDebeziumUpsert is generated, and commonly overridden per source.
 	propDebeziumUpsert = "debezium.sink.iceberg.upsert"
 	// authTypeOAuth2 is the OAuth2 authentication type in Trino and Iceberg.
@@ -411,6 +415,16 @@ func debeziumProperties(
 		// start asking for WAL the slot has released; resume from whichever
 		// position is further along instead.
 		props["debezium.source.offset.mismatch.strategy"] = "trust_greater_lsn"
+		// The slot is only confirmed as captured tables change, so a quiet
+		// table list pins WAL for the whole instance until Postgres
+		// invalidates the slot (max_slot_wal_keep_size), and the connector can
+		// never resume. A logical decoding message every heartbeat moves the
+		// slot forward without a heartbeat table; excluding its prefix keeps
+		// the messages out of Iceberg.
+		props["debezium.source.heartbeat.interval.ms"] = debeziumHeartbeatIntervalMS
+		props["debezium.source.heartbeat.action.query"] = "SELECT pg_logical_emit_message(false, '" +
+			debeziumHeartbeatPrefix + "', now()::text)"
+		props["debezium.source.message.prefix.exclude.list"] = debeziumHeartbeatPrefix
 	case dataplatformv1alpha1.DebeziumConnectorSQLServer:
 		props["debezium.source.database.names"] = src.Database
 	}
