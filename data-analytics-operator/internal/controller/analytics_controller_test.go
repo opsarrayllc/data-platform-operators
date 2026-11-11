@@ -149,6 +149,9 @@ var _ = Describe("Analytics Controller", func() {
 		// JumpCloud only accepts client_secret_basic for the Trino client.
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("auth=(config[\"id\"], config[\"secret\"])"))
 		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring("TrinoEngineSpec.get_oauth2_token = classmethod(get_oauth2_token)"))
+		// The OAuth2 popup's script needs the CSP nonce to close itself.
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`DictLoader({"superset/oauth2.html": oauth2_page})`))
+		Expect(supersetCM.Data[supersetConfigKey]).To(ContainSubstring(`<script nonce="{{ csp_nonce() if csp_nonce is defined else '' }}">`))
 		caCopy := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTrinoCA, Namespace: nameSuperset}, caCopy)).To(Succeed())
 		Expect(caCopy.Data[keyTrinoCA]).To(Equal(testTrinoCA))
