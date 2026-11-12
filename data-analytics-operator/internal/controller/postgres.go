@@ -27,14 +27,46 @@ import (
 	analyticsv1alpha1 "github.com/opsarrayllc/data-analytics-operator/api/v1alpha1"
 )
 
-// postgresConn is Superset's metadata database connection. Credentials are
+// postgresInstance names one application's database objects, so Superset and
+// Teable share the embedded/external Postgres logic.
+type postgresInstance struct {
+	component string
+	// name is the embedded StatefulSet and Service, and the in-cluster host.
+	name string
+	// user is the embedded superuser the application connects as.
+	user string
+	// secret holds generated credentials for the embedded instance.
+	secret string
+	// externalSecret holds credentials copied from an external database's Secret.
+	externalSecret string
+	defaultDB      string
+	spec           analyticsv1alpha1.PostgresSpec
+}
+
+func supersetPostgres(a *analyticsv1alpha1.Analytics) postgresInstance {
+	return postgresInstance{
+		component:      componentSupersetPostgres,
+		name:           namePostgres,
+		user:           namePostgres,
+		secret:         secretPostgres,
+		externalSecret: secretPostgresExternal,
+		defaultDB:      "superset",
+		spec:           a.Spec.Postgres,
+	}
+}
+
+func (p postgresInstance) database() string {
+	return p.spec.DatabaseOr(p.defaultDB)
+}
+
+// postgresConn is an application's database connection. Credentials are
 // read by pods from Secret, never from plain env values or the ConfigMap.
 type postgresConn struct {
 	Host     string
 	Port     int32
 	Database string
 	SSLMode  string
-	// Secret holds keyPostgresUsername and keyPostgresPassword in the Superset namespace.
+	// Secret holds keyPostgresUsername and keyPostgresPassword in the application namespace.
 	Secret string
 	// External is true when the database is not operator-managed.
 	External bool
@@ -49,22 +81,36 @@ const ensureDatabaseScript = `until pg_isready -q; do sleep 2; done
 if psql -d "$TARGET_DB" -tAc 'SELECT 1' >/dev/null 2>&1; then exit 0; fi
 psql -d postgres -v ON_ERROR_STOP=1 -c "CREATE DATABASE \"$TARGET_DB\""`
 
-func (r *AnalyticsReconciler) reconcileSupersetPostgres(
+// reconcilePostgres deploys an embedded database, or copies an external
+// database's credentials into the application namespace.
+func (r *AnalyticsReconciler) reconcilePostgres(
 	ctx context.Context,
 	a *analyticsv1alpha1.Analytics,
 	ns string,
+	p postgresInstance,
 ) (postgresConn, error) {
-	spec := a.Spec.Postgres
+	spec := p.spec
 	if spec.IsEmbedded() {
-		if err := r.applySupersetPostgres(ctx, a, ns); err != nil {
+		password, err := randomHex(16)
+		if err != nil {
+			return postgresConn{}, err
+		}
+		if err := r.ensureGeneratedSecret(ctx, a, p.secret, ns, p.component, map[string][]byte{
+			keyPostgresUsername: []byte(p.user),
+			keyPostgresPassword: []byte(password),
+			keyPostgresDatabase: []byte(p.database()),
+		}); err != nil {
+			return postgresConn{}, err
+		}
+		if err := r.applyPostgres(ctx, a, ns, p); err != nil {
 			return postgresConn{}, err
 		}
 		return postgresConn{
-			Host:     namePostgres,
+			Host:     p.name,
 			Port:     postgresPort,
-			Database: spec.DatabaseOrDefault(),
+			Database: p.database(),
 			SSLMode:  "disable",
-			Secret:   secretPostgres,
+			Secret:   p.secret,
 		}, nil
 	}
 
@@ -87,9 +133,9 @@ func (r *AnalyticsReconciler) reconcileSupersetPostgres(
 	if err != nil {
 		return postgresConn{}, err
 	}
-	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretPostgresExternal, Namespace: ns}}
+	secret := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: p.externalSecret, Namespace: ns}}
 	if err := r.apply(ctx, a, secret, func() error {
-		ensureLabels(secret, labelsFor(a, componentSupersetPostgres))
+		ensureLabels(secret, labelsFor(a, p.component))
 		secret.Type = corev1.SecretTypeOpaque
 		secret.Data = map[string][]byte{
 			keyPostgresUsername: []byte(user),
@@ -102,9 +148,9 @@ func (r *AnalyticsReconciler) reconcileSupersetPostgres(
 	return postgresConn{
 		Host:            spec.Host,
 		Port:            spec.PortOrDefault(),
-		Database:        spec.DatabaseOrDefault(),
+		Database:        p.database(),
 		SSLMode:         spec.SSLModeOrDefault(),
-		Secret:          secretPostgresExternal,
+		Secret:          p.externalSecret,
 		External:        true,
 		CredentialsHash: hashData(user, pass),
 	}, nil
@@ -123,8 +169,17 @@ func supersetDatabaseEnv(conn postgresConn) []corev1.EnvVar {
 	}
 }
 
+// postgresReady reports whether the database can take connections: always for
+// an external server, or once the embedded StatefulSet is ready.
+func (r *AnalyticsReconciler) postgresReady(ctx context.Context, ns string, p postgresInstance, conn postgresConn) (bool, error) {
+	if conn.External {
+		return true, nil
+	}
+	return r.statefulSetReady(ctx, ns, p.name)
+}
+
 // ensureDatabaseContainer is the init container that creates an external
-// database before Superset runs its migrations.
+// database before the application runs its migrations.
 func ensureDatabaseContainer(image string, conn postgresConn) corev1.Container {
 	return corev1.Container{
 		Name:    "ensure-database",

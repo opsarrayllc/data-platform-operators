@@ -87,3 +87,31 @@ output "analytics_postgres" {
   description = "Analytics spec.postgres for the RDS instance. Null when create_postgres is false."
   value       = var.create_postgres ? merge(local.postgres_ref, { database = "superset" }) : null
 }
+
+output "analytics_teable_postgres" {
+  description = "Analytics spec.teable.postgres for the RDS instance. Null when create_postgres is false."
+  value       = var.create_postgres ? merge(local.postgres_ref, { database = "teable" }) : null
+}
+
+output "analytics_teable_storage" {
+  description = "Analytics spec.teable.storage. credentialsSecretRef names a Secret you create from teable_s3_credentials_secret_data, in Teable's namespace. Null when create_teable is false."
+  value = var.create_teable ? {
+    endpoint       = "https://s3.${var.region}.amazonaws.com"
+    region         = var.region
+    forcePathStyle = false
+    publicBucket   = aws_s3_bucket.teable["public"].id
+    privateBucket  = aws_s3_bucket.teable["private"].id
+    credentialsSecretRef = {
+      name = "teable-s3"
+    }
+  } : null
+}
+
+output "teable_s3_credentials_secret_data" {
+  description = "Kubernetes Secret data for Teable's IAM user. Keys match spec.teable.storage.credentialsSecretRef's defaults. Null when create_teable is false."
+  sensitive   = true
+  value = var.create_teable ? {
+    AWS_ACCESS_KEY_ID     = aws_iam_access_key.teable[0].id
+    AWS_SECRET_ACCESS_KEY = aws_iam_access_key.teable[0].secret
+  } : null
+}

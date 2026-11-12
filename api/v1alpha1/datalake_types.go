@@ -104,6 +104,7 @@ const (
 	DefaultOIDCOpaClientID      = "opa"
 	DefaultOIDCSupersetClientID = "superset"
 	DefaultOIDCArgoClientID     = "argo"
+	DefaultOIDCTeableClientID   = "teable"
 	DefaultOIDCDebeziumClientID = "debezium"
 	DefaultOIDCOperatorClient   = "operator"
 	DefaultOIDCScope            = "lakekeeper"

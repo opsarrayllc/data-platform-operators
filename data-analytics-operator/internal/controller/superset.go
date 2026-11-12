@@ -25,7 +25,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
@@ -52,13 +51,13 @@ func (r *AnalyticsReconciler) reconcileSuperset(ctx context.Context, a *analytic
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	conn, err := r.reconcileSupersetPostgres(ctx, a, ns)
+	conn, err := r.reconcilePostgres(ctx, a, ns, supersetPostgres(a))
 	if err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionPostgresReady, metav1.ConditionFalse, reasonError, err.Error())
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
-	if err := r.applySupersetRedis(ctx, a, ns); err != nil {
+	if err := r.applyRedis(ctx, a, ns, nameSupersetRedis, componentSupersetRedis, a.Spec.Redis); err != nil {
 		setCondition(a, analyticsv1alpha1.ConditionSupersetReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -157,20 +156,6 @@ func (r *AnalyticsReconciler) ensureSupersetSecrets(
 	ns string,
 	oidc oidcConfig,
 ) error {
-	if a.Spec.Postgres.IsEmbedded() {
-		password, err := randomHex(16)
-		if err != nil {
-			return err
-		}
-		if err := r.ensureGeneratedSecret(ctx, a, secretPostgres, ns, componentSupersetPostgres, map[string][]byte{
-			keyPostgresUsername: []byte(namePostgres),
-			keyPostgresPassword: []byte(password),
-			keyPostgresDatabase: []byte(a.Spec.Postgres.DatabaseOrDefault()),
-		}); err != nil {
-			return err
-		}
-	}
-
 	secretKey, err := randomHex(32)
 	if err != nil {
 		return err
@@ -203,120 +188,6 @@ func (r *AnalyticsReconciler) ensureSupersetOIDCSecret(
 		secret.Data[keyOIDCSupersetClientSecret] = []byte(oidc.supersetSecret)
 		secret.Data[keyOIDCTrinoClientID] = []byte(oidc.trinoClientID)
 		secret.Data[keyOIDCTrinoClientSecret] = []byte(oidc.trinoSecret)
-		return nil
-	})
-}
-
-func (r *AnalyticsReconciler) applySupersetPostgres(ctx context.Context, a *analyticsv1alpha1.Analytics, ns string) error {
-	spec := a.Spec.Postgres
-	qty, err := resource.ParseQuantity(spec.StorageSizeOrDefault())
-	if err != nil {
-		return fmt.Errorf("invalid postgres storageSize: %w", err)
-	}
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: ns}}
-	labels := labelsFor(a, componentSupersetPostgres)
-	if err := r.apply(ctx, a, svc, func() error {
-		ensureLabels(svc, labels)
-		svc.Spec.Selector = labels
-		svc.Spec.Ports = []corev1.ServicePort{{
-			Name:       namePostgres,
-			Port:       postgresPort,
-			TargetPort: intstr.FromInt32(postgresPort),
-		}}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	sts := &appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Name: namePostgres, Namespace: ns}}
-	return r.apply(ctx, a, sts, func() error {
-		ensureLabels(sts, labels)
-		if sts.CreationTimestamp.IsZero() {
-			sts.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
-			sts.Spec.ServiceName = namePostgres
-			sts.Spec.VolumeClaimTemplates = []corev1.PersistentVolumeClaim{{
-				ObjectMeta: metav1.ObjectMeta{Name: volumeData},
-				Spec: corev1.PersistentVolumeClaimSpec{
-					AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
-					Resources: corev1.VolumeResourceRequirements{
-						Requests: corev1.ResourceList{corev1.ResourceStorage: qty},
-					},
-				},
-			}}
-		}
-		sts.Spec.Replicas = ptr.To(int32(1))
-		sts.Spec.Template.Labels = labels
-		sts.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(uidPostgres, gidPostgres)
-		sts.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:  namePostgres,
-			Image: spec.ImageOrDefault(),
-			Ports: []corev1.ContainerPort{{Name: namePostgres, ContainerPort: postgresPort}},
-			Env: []corev1.EnvVar{
-				{Name: envPostgresUser, Value: namePostgres},
-				{
-					Name: envPostgresPassword,
-					ValueFrom: &corev1.EnvVarSource{
-						SecretKeyRef: &corev1.SecretKeySelector{
-							LocalObjectReference: corev1.LocalObjectReference{Name: secretPostgres},
-							Key:                  keyPostgresPassword,
-						},
-					},
-				},
-				{Name: envPostgresDB, Value: spec.DatabaseOrDefault()},
-				{Name: keyPGDATA, Value: pgDataPath},
-			},
-			VolumeMounts: []corev1.VolumeMount{{Name: volumeData, MountPath: pgDataMount}},
-			ReadinessProbe: &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(postgresPort)},
-				},
-				PeriodSeconds: 5,
-			},
-			SecurityContext: restrictedContainerSecurity(uidPostgres, gidPostgres),
-		}}
-		return nil
-	})
-}
-
-func (r *AnalyticsReconciler) applySupersetRedis(ctx context.Context, a *analyticsv1alpha1.Analytics, ns string) error {
-	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Name: nameSupersetRedis, Namespace: ns}}
-	labels := labelsFor(a, componentSupersetRedis)
-	if err := r.apply(ctx, a, svc, func() error {
-		ensureLabels(svc, labels)
-		svc.Spec.Selector = labels
-		svc.Spec.Ports = []corev1.ServicePort{{
-			Name:       nameSupersetRedis,
-			Port:       redisPort,
-			TargetPort: intstr.FromInt32(redisPort),
-		}}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameSupersetRedis, Namespace: ns}}
-	return r.apply(ctx, a, deploy, func() error {
-		ensureLabels(deploy, labels)
-		if deploy.CreationTimestamp.IsZero() {
-			deploy.Spec.Selector = &metav1.LabelSelector{MatchLabels: labels}
-		}
-		deploy.Spec.Replicas = ptr.To(int32(1))
-		deploy.Spec.Template.Labels = labels
-		deploy.Spec.Template.Spec.SecurityContext = restrictedPodSecurity(uidRedis, gidRedis)
-		deploy.Spec.Template.Spec.Containers = []corev1.Container{{
-			Name:            nameSupersetRedis,
-			Image:           a.Spec.Redis.ImageOrDefault(),
-			ImagePullPolicy: corev1.PullIfNotPresent,
-			Ports:           []corev1.ContainerPort{{Name: nameSupersetRedis, ContainerPort: redisPort}},
-			ReadinessProbe: &corev1.Probe{
-				ProbeHandler: corev1.ProbeHandler{
-					TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(redisPort)},
-				},
-				PeriodSeconds: 5,
-			},
-			Resources:       a.Spec.Redis.Resources,
-			SecurityContext: restrictedContainerSecurity(uidRedis, gidRedis),
-		}}
 		return nil
 	})
 }

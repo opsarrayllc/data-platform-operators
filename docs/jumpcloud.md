@@ -4,7 +4,7 @@ Embedded Keycloak is for local development. In a shared environment, people sign
 
 There are two kinds of sign-in:
 
-- **People** sign in through the browser to the LakeKeeper UI, Trino, Superset, and Argo. They use JumpCloud directly, with the authorization-code flow.
+- **People** sign in through the browser to the LakeKeeper UI, Trino, Superset, Teable, and Argo. They use JumpCloud directly, with the authorization-code flow.
 - **Machines** call LakeKeeper: the operator, Trino's Iceberg catalog, the OPA bridge, and Debezium Server when `spec.debezium` has sources. They use the OAuth2 client-credentials grant, which JumpCloud doesn't offer. Set `spec.auth.serviceAccountTokens` so they use Kubernetes ServiceAccount tokens instead.
 
 ## JumpCloud facts that matter
@@ -26,6 +26,7 @@ Create one OIDC application per client:
 | `trino` | Trino web UI and clients, Superset's per-user Trino login | `https://trino.example.com/oauth2/callback`, `https://superset.example.com/api/v1/database/oauth2/` |
 | `superset` | Superset login | `https://superset.example.com/oauth-authorized/oidc` |
 | `argo` | Argo login | `https://argo.example.com/oauth2/callback` |
+| `teable` | Teable login (only when `spec.teable` is enabled) | `https://teable.example.com/api/auth/oidc/callback` |
 
 Turn on the group attribute (`groups`) on the `trino`, `superset`, and `argo` applications. Create the JumpCloud user groups `platform-admins`, `data-engineers`, and `analysts`, and bind them to the applications. Superset and Argo map those group names to roles.
 
@@ -40,8 +41,12 @@ kubectl -n lakekeeper create secret generic jumpcloud-oidc \
   --from-literal=supersetClientID=<superset client id> \
   --from-literal=supersetClientSecret=<superset client secret> \
   --from-literal=argoClientID=<argo client id> \
-  --from-literal=argoClientSecret=<argo client secret>
+  --from-literal=argoClientSecret=<argo client secret> \
+  --from-literal=teableClientID=<teable client id> \
+  --from-literal=teableClientSecret=<teable client secret>
 ```
+
+The Teable keys are only needed when the Analytics resource enables `spec.teable`.
 
 ## DataLake
 
@@ -130,6 +135,30 @@ For a non-Keycloak issuer, the analytics operator reads the login, token, JWKS, 
 - Groups come from `groupsClaim`, in the ID token or userinfo.
 
 You can override each endpoint with `authorizationEndpoint`, `tokenEndpoint`, `jwksURI`, or `userinfoEndpoint`.
+
+## Analytics (Teable)
+
+Teable reuses the Analytics resource's `spec.auth.oidc`. It reads `teableClientID` and `teableClientSecret` from the same Secret.
+
+```yaml
+spec:
+  teable:
+    enabled: true
+    publicURL: https://teable.example.com
+    storage:
+      endpoint: https://s3.us-east-1.amazonaws.com
+      region: us-east-1
+      publicBucket: <prefix>-public
+      privateBucket: <prefix>-private
+      credentialsSecretRef:
+        name: teable-s3
+```
+
+- The `teable` application needs the `email` scope. Teable rejects sign-ins without an email.
+- When auth is enabled, password login is turned off. Every Teable user signs in through the identity provider.
+- Groups don't map to anything in Teable. Access to spaces and bases is managed inside Teable.
+- Teable's data is never exposed through Trino or Superset.
+- The Terraform module's `create_teable` creates the buckets and an IAM user for `teable-s3`. Its outputs are `analytics_teable_storage` and `teable_s3_credentials_secret_data`.
 
 ## Orchestration (Argo)
 

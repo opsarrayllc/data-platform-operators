@@ -87,9 +87,23 @@ func (r *AnalyticsReconciler) reconcile(ctx context.Context, a *analyticsv1alpha
 		setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionFalse, reasonError, err.Error())
 		return ctrl.Result{}, err
 	}
+	// Teable is independent of Superset, so reconcile it even while Superset
+	// is still starting.
+	if err := r.reconcileTeable(ctx, a, oidc); err != nil {
+		setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionFalse, reasonError, err.Error())
+		return ctrl.Result{}, err
+	}
 	if !conditionTrue(a, analyticsv1alpha1.ConditionSupersetReady) {
 		setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionFalse, reasonReconciling, "Waiting for Superset to become ready")
 		return ctrl.Result{RequeueAfter: requeueWhileProgressing}, nil
+	}
+	if a.Spec.Teable.IsEnabled() {
+		if !conditionTrue(a, analyticsv1alpha1.ConditionTeableReady) {
+			setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionFalse, reasonReconciling, "Waiting for Teable to become ready")
+			return ctrl.Result{RequeueAfter: requeueWhileProgressing}, nil
+		}
+		setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionTrue, reasonReady, "Superset and Teable are ready")
+		return ctrl.Result{}, nil
 	}
 
 	setCondition(a, analyticsv1alpha1.ConditionReady, metav1.ConditionTrue, reasonReady, "Superset is ready")
@@ -127,6 +141,10 @@ type oidcConfig struct {
 	supersetSecret   string
 	trinoClientID    string
 	trinoSecret      string
+	// teableClientID and teableSecret are read only when Teable is enabled,
+	// so an oidc Secret without them keeps working for Superset alone.
+	teableClientID string
+	teableSecret   string
 }
 
 func (r *AnalyticsReconciler) resolveOIDC(ctx context.Context, a *analyticsv1alpha1.Analytics) (oidcConfig, error) {
@@ -178,6 +196,14 @@ func (r *AnalyticsReconciler) resolveOIDC(ctx context.Context, a *analyticsv1alp
 		supersetSecret:   supersetSecret,
 		trinoClientID:    trinoID,
 		trinoSecret:      trinoSecret,
+	}
+	if a.Spec.Teable.IsEnabled() {
+		if cfg.teableClientID, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.TeableClientIDKeyOrDefault()); err != nil {
+			return oidcConfig{}, err
+		}
+		if cfg.teableSecret, err = r.getSecretData(ctx, ref.Name, ref.Namespace, ref.TeableClientSecretKeyOrDefault()); err != nil {
+			return oidcConfig{}, err
+		}
 	}
 	if err := r.resolveOIDCEndpoints(ctx, &cfg); err != nil {
 		return oidcConfig{}, err

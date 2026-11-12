@@ -266,6 +266,10 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 		if genErr != nil {
 			return genErr
 		}
+		teableSecret, genErr := randomHex(16)
+		if genErr != nil {
+			return genErr
+		}
 		return r.ensureGeneratedSecret(ctx, dp, secretOIDC, ns, componentKeycloak, map[string][]byte{
 			keyOIDCClientID:             []byte(dataplatformv1alpha1.DefaultOIDCClientID),
 			keyOIDCTrinoClientID:        []byte(dataplatformv1alpha1.DefaultOIDCTrinoClientID),
@@ -280,6 +284,8 @@ func (r *DataLakeReconciler) ensureKeycloakSecrets(ctx context.Context, dp *data
 			keyOIDCArgoClientSecret:     []byte(argoSecret),
 			keyOIDCDebeziumClientID:     []byte(dataplatformv1alpha1.DefaultOIDCDebeziumClientID),
 			keyOIDCDebeziumClientSecret: []byte(debeziumSecret),
+			keyOIDCTeableClientID:       []byte(dataplatformv1alpha1.DefaultOIDCTeableClientID),
+			keyOIDCTeableClientSecret:   []byte(teableSecret),
 		})
 	}
 	if err != nil {
@@ -341,6 +347,18 @@ func (r *DataLakeReconciler) ensureOIDCSecretKeys(ctx context.Context, oidc *cor
 		oidc.Data[keyOIDCDebeziumClientSecret] = []byte(secret)
 		changed = true
 	}
+	if _, ok := oidc.Data[keyOIDCTeableClientID]; !ok {
+		oidc.Data[keyOIDCTeableClientID] = []byte(dataplatformv1alpha1.DefaultOIDCTeableClientID)
+		changed = true
+	}
+	if _, ok := oidc.Data[keyOIDCTeableClientSecret]; !ok {
+		secret, err := randomHex(16)
+		if err != nil {
+			return err
+		}
+		oidc.Data[keyOIDCTeableClientSecret] = []byte(secret)
+		changed = true
+	}
 	if !changed {
 		return nil
 	}
@@ -381,6 +399,10 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 	if err != nil {
 		return "", err
 	}
+	teableSecret, err := r.getSecretData(ctx, secretOIDC, ns, keyOIDCTeableClientSecret)
+	if err != nil {
+		return "", err
+	}
 	signingKey, err := r.getSecretData(ctx, secretKeycloakRealmKey, ns, keyRealmPrivateKey)
 	if err != nil {
 		return "", err
@@ -398,6 +420,7 @@ func (r *DataLakeReconciler) applyKeycloakRealm(
 		supersetSecret:      supersetSecret,
 		argoSecret:          argoSecret,
 		debeziumSecret:      debeziumSecret,
+		teableSecret:        teableSecret,
 		signingKey:          signingKey,
 		signingCertificate:  signingCert,
 		lakekeeperNamespace: dp.Spec.Lakekeeper.NamespaceOrDefault(),
@@ -546,6 +569,7 @@ type realmOptions struct {
 	supersetSecret      string
 	argoSecret          string
 	debeziumSecret      string
+	teableSecret        string
 	signingKey          string
 	signingCertificate  string
 	lakekeeperNamespace string
@@ -586,6 +610,11 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 	supersetRedirects := []string{"*"}
 	// Argo's callback host is chosen by the orchestration operator.
 	argoRedirects := []string{"*"}
+	// Teable's callback host is chosen by the analytics operator. Teable only
+	// signs people in, so its client gets no service account: nothing should
+	// mint a machine token as Teable.
+	teableClient := confidentialClient(dataplatformv1alpha1.DefaultOIDCTeableClientID, "Teable", opts.teableSecret, []string{"*"})
+	teableClient["serviceAccountsEnabled"] = false
 
 	doc := map[string]any{
 		"realm":               realm,
@@ -629,6 +658,7 @@ func keycloakRealmJSON(opts realmOptions) (string, error) {
 			// Debezium Server writes change streams through the Iceberg REST
 			// catalog with client credentials only, so it has no redirects.
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCDebeziumClientID, "Debezium", opts.debeziumSecret, nil),
+			teableClient,
 			confidentialClient(dataplatformv1alpha1.DefaultOIDCOperatorClient, "Data Platform Operator", operatorSecret, nil),
 		},
 		"users": []map[string]any{
