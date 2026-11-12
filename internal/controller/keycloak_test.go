@@ -232,3 +232,77 @@ func TestOIDCSecretKeysBackfillDebezium(t *testing.T) {
 		t.Fatalf("debezium client secret = %q, want 32 hex characters", s.Data[keyOIDCDebeziumClientSecret])
 	}
 }
+
+// TestRealmTeableClient checks that Teable gets a browser-login client with no
+// service account, so nothing can mint a machine token as Teable.
+func TestRealmTeableClient(t *testing.T) {
+	key, cert, err := generateRealmSigningKey("dataplatform")
+	if err != nil {
+		t.Fatalf("generate signing key: %v", err)
+	}
+	raw, err := keycloakRealmJSON(realmOptions{
+		spec:                dataplatformv1alpha1.KeycloakSpec{},
+		adminPassword:       "adminpass",
+		teableSecret:        "teablesecret",
+		signingKey:          key,
+		signingCertificate:  cert,
+		lakekeeperNamespace: "lakekeeper",
+	})
+	if err != nil {
+		t.Fatalf("render realm: %v", err)
+	}
+	var realm struct {
+		Clients []struct {
+			ClientID               string   `json:"clientId"`
+			Secret                 string   `json:"secret"`
+			StandardFlowEnabled    bool     `json:"standardFlowEnabled"`
+			ServiceAccountsEnabled bool     `json:"serviceAccountsEnabled"`
+			RedirectURIs           []string `json:"redirectUris"`
+		} `json:"clients"`
+		Users []struct {
+			Username string `json:"username"`
+		} `json:"users"`
+	}
+	if err := json.Unmarshal([]byte(raw), &realm); err != nil {
+		t.Fatalf("realm is not valid JSON: %v", err)
+	}
+	found := false
+	for _, c := range realm.Clients {
+		if c.ClientID != dataplatformv1alpha1.DefaultOIDCTeableClientID {
+			continue
+		}
+		found = true
+		if c.Secret != "teablesecret" || !c.StandardFlowEnabled || len(c.RedirectURIs) == 0 {
+			t.Errorf("teable client = %+v, want a confidential authorization-code client", c)
+		}
+		if c.ServiceAccountsEnabled {
+			t.Error("teable client has a service account")
+		}
+	}
+	if !found {
+		t.Fatal("realm is missing the teable client")
+	}
+	for _, u := range realm.Users {
+		if u.Username == "service-account-"+dataplatformv1alpha1.DefaultOIDCTeableClientID {
+			t.Error("realm imports a teable service-account user")
+		}
+	}
+}
+
+// TestOIDCSecretKeysBackfillTeable guards upgrades: clusters whose oidc
+// Secret predates the Teable client get its id and a generated secret.
+func TestOIDCSecretKeysBackfillTeable(t *testing.T) {
+	s := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: secretOIDC, Namespace: "keycloak"}, Data: map[string][]byte{
+		keyOIDCSupersetClientID: []byte("superset"),
+	}}
+	r := &DataLakeReconciler{Client: fake.NewClientBuilder().WithObjects(s.DeepCopy()).Build()}
+	if err := r.ensureOIDCSecretKeys(context.Background(), s); err != nil {
+		t.Fatalf("ensureOIDCSecretKeys: %v", err)
+	}
+	if got := string(s.Data[keyOIDCTeableClientID]); got != dataplatformv1alpha1.DefaultOIDCTeableClientID {
+		t.Fatalf("teable client id = %q", got)
+	}
+	if len(s.Data[keyOIDCTeableClientSecret]) != 32 {
+		t.Fatalf("teable client secret = %q, want 32 hex characters", s.Data[keyOIDCTeableClientSecret])
+	}
+}

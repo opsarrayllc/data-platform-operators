@@ -23,7 +23,7 @@ import (
 )
 
 const (
-	// ConditionReady is True when Superset can serve dashboards.
+	// ConditionReady is True when Superset, and Teable if enabled, are ready.
 	ConditionReady = "Ready"
 	// ConditionPostgresReady is True when Superset's metadata database is usable.
 	ConditionPostgresReady = "PostgresReady"
@@ -64,6 +64,25 @@ const (
 	DefaultSupersetClientSecretKey = "supersetClientSecret"
 	DefaultTrinoClientIDKey        = "trinoClientID"
 	DefaultTrinoClientSecretKey    = "trinoClientSecret"
+	DefaultTeableClientIDKey       = "teableClientID"
+	DefaultTeableClientSecretKey   = "teableClientSecret"
+
+	// ConditionTeableReady is True when Teable is disabled or its Deployment is ready.
+	ConditionTeableReady = "TeableReady"
+	// ConditionTeablePostgresReady is True when Teable's database is usable.
+	ConditionTeablePostgresReady = "TeablePostgresReady"
+
+	DefaultTeableNamespace = "teable"
+	// DefaultTeableImage is a pinned Teable community release. Teable runs its
+	// own database migrations on start.
+	DefaultTeableImage         = "ghcr.io/teableio/teable:release.2026-11-06T11-23-32Z.3804"
+	DefaultTeableDatabase      = "teable"
+	DefaultTeablePublicBucket  = "teable-public"
+	DefaultTeablePrivateBucket = "teable-private"
+	DefaultTeableS3Region      = "us-east-1"
+	// DefaultMcImage matches the data lake operator's MinIO client image;
+	// upstream minio/mc is no longer anonymously pullable.
+	DefaultMcImage = "docker.io/pgsty/mc:RELEASE.2026-09-16T00-00-00Z"
 )
 
 // AnalyticsSpec defines the desired state of Analytics.
@@ -113,12 +132,137 @@ type AnalyticsSpec struct {
 	// logged-in user via per-user Trino OAuth2.
 	// +optional
 	Auth AuthSpec `json:"auth"`
+
+	// teable deploys Teable, a collaborative spreadsheet app, next to
+	// Superset. It reuses auth.oidc for sign-in. Teable data is reachable only
+	// through Teable's own sharing, never through Trino or Superset.
+	// +optional
+	Teable TeableSpec `json:"teable"`
 }
 
-// PostgresSpec configures Superset's metadata database: either an
-// operator-managed instance or a pointer at an existing server.
+// TeableSpec configures the optional Teable deployment.
+type TeableSpec struct {
+	// enabled deploys Teable. Defaults to false.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// namespace is where Teable, its Postgres, and its Redis run.
+	// Defaults to "teable".
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// image is the Teable container image.
+	// +optional
+	Image string `json:"image,omitempty"`
+
+	// publicURL is the Teable URL browsers use (for example
+	// https://teable.example.com). Required when enabled.
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// postgres is Teable's database. Defaults to an embedded instance with a
+	// database named "teable".
+	// +optional
+	Postgres PostgresSpec `json:"postgres"`
+
+	// redis is Teable's cache and queue.
+	// +optional
+	Redis RedisSpec `json:"redis"`
+
+	// storage is the S3-compatible object store for attachments.
+	// +optional
+	Storage TeableStorageSpec `json:"storage"`
+
+	// resources are compute resource requirements for the Teable container.
+	// +optional
+	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// extraEnv is appended to the Teable container.
+	// +optional
+	ExtraEnv []corev1.EnvVar `json:"extraEnv,omitempty"`
+
+	// service exposes the Teable HTTP port.
+	// +optional
+	Service ServiceSpec `json:"service"`
+}
+
+// TeableStorageSpec points Teable at an S3-compatible object store: AWS S3 in
+// production, MinIO for development.
+type TeableStorageSpec struct {
+	// endpoint is the S3 API URL browsers use for presigned uploads and
+	// downloads, for example https://s3.us-east-1.amazonaws.com or
+	// https://minio-api.data-platform.local. Required when Teable is enabled.
+	// +optional
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// internalEndpoint is the S3 API URL Teable itself uses, for example
+	// http://minio.minio.svc:9000. Defaults to endpoint.
+	// +optional
+	InternalEndpoint string `json:"internalEndpoint,omitempty"`
+
+	// region of the buckets. Defaults to us-east-1.
+	// +optional
+	Region string `json:"region,omitempty"`
+
+	// forcePathStyle uses https://endpoint/bucket/key addressing, which MinIO
+	// needs. Defaults to false (virtual-hosted, as AWS S3 prefers).
+	// +optional
+	ForcePathStyle *bool `json:"forcePathStyle,omitempty"`
+
+	// publicBucket holds avatars and other public assets and must allow
+	// anonymous reads. Defaults to teable-public.
+	// +optional
+	PublicBucket string `json:"publicBucket,omitempty"`
+
+	// privateBucket holds attachments, served through presigned URLs.
+	// Defaults to teable-private.
+	// +optional
+	PrivateBucket string `json:"privateBucket,omitempty"`
+
+	// publicURL is the browser URL of the public bucket, including the bucket.
+	// Defaults to endpoint/publicBucket with path style, or
+	// scheme://publicBucket.endpointHost otherwise.
+	// +optional
+	PublicURL string `json:"publicURL,omitempty"`
+
+	// credentialsSecretRef locates the S3 access key pair. Required when
+	// Teable is enabled.
+	// +optional
+	CredentialsSecretRef *S3CredentialsSecretRef `json:"credentialsSecretRef,omitempty"`
+
+	// createBuckets creates both buckets if they are missing and allows
+	// anonymous downloads from the public bucket, using the MinIO client.
+	// Intended for development MinIO. Defaults to false; on AWS, create the
+	// buckets with Terraform.
+	// +optional
+	CreateBuckets *bool `json:"createBuckets,omitempty"`
+}
+
+// S3CredentialsSecretRef locates a Secret with an S3 access key pair.
+type S3CredentialsSecretRef struct {
+	// name of the Secret.
+	Name string `json:"name"`
+
+	// namespace of the Secret. Defaults to the Teable namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// accessKeyIDKey is the Secret key for the access key id.
+	// +optional
+	// +kubebuilder:default=AWS_ACCESS_KEY_ID
+	AccessKeyIDKey string `json:"accessKeyIDKey,omitempty"`
+
+	// secretAccessKeyKey is the Secret key for the secret access key.
+	// +optional
+	// +kubebuilder:default=AWS_SECRET_ACCESS_KEY
+	SecretAccessKeyKey string `json:"secretAccessKeyKey,omitempty"`
+}
+
+// PostgresSpec configures an application database (Superset's metadata or
+// Teable's data): either an operator-managed instance or a pointer at an
+// existing server.
 type PostgresSpec struct {
-	// embedded deploys a single-replica Postgres in the Superset namespace.
+	// embedded deploys a single-replica Postgres in the application's namespace.
 	// Defaults to true. Set false and fill host/credentials for an external
 	// database. When false, the operator creates the database on that server if
 	// it does not exist, so the credentials need CREATEDB or the database must
@@ -135,7 +279,7 @@ type PostgresSpec struct {
 	// +optional
 	StorageSize string `json:"storageSize,omitempty"`
 
-	// database name. Defaults to "superset".
+	// database name. Defaults to "superset" for Superset and "teable" for Teable.
 	// +optional
 	// +kubebuilder:validation:Pattern=`^[a-z_][a-z0-9_]{0,62}$`
 	Database string `json:"database,omitempty"`
@@ -163,7 +307,7 @@ type PostgresCredentialsSecretRef struct {
 	// name of the Secret.
 	Name string `json:"name"`
 
-	// namespace of the Secret. Defaults to the Superset namespace.
+	// namespace of the Secret. Defaults to the application's namespace.
 	// +optional
 	Namespace string `json:"namespace,omitempty"`
 
@@ -327,6 +471,14 @@ type CredentialsSecretRef struct {
 	// trinoClientSecretKey defaults to trinoClientSecret.
 	// +optional
 	TrinoClientSecretKey string `json:"trinoClientSecretKey,omitempty"`
+
+	// teableClientIDKey defaults to teableClientID. Read only when Teable is enabled.
+	// +optional
+	TeableClientIDKey string `json:"teableClientIDKey,omitempty"`
+
+	// teableClientSecretKey defaults to teableClientSecret. Read only when Teable is enabled.
+	// +optional
+	TeableClientSecretKey string `json:"teableClientSecretKey,omitempty"`
 }
 
 // AnalyticsStatus defines the observed state of Analytics.
@@ -338,6 +490,8 @@ type AnalyticsStatus struct {
 	// - "PostgresReady": the metadata database is usable
 	// - "RedisReady": Redis is ready
 	// - "SupersetReady": the Superset Deployment is ready
+	// - "TeablePostgresReady": Teable's database is usable (Teable enabled only)
+	// - "TeableReady": the Teable Deployment is ready (Teable enabled only)
 	//
 	// +listType=map
 	// +listMapKey=type
@@ -347,6 +501,10 @@ type AnalyticsStatus struct {
 	// supersetEndpoint is the in-cluster HTTP URL of Superset.
 	// +optional
 	SupersetEndpoint string `json:"supersetEndpoint,omitempty"`
+
+	// teableEndpoint is the in-cluster HTTP URL of Teable, when enabled.
+	// +optional
+	TeableEndpoint string `json:"teableEndpoint,omitempty"`
 }
 
 // +kubebuilder:object:root=true
@@ -354,6 +512,7 @@ type AnalyticsStatus struct {
 // +kubebuilder:resource:path=analytics,scope=Cluster,singular=analytics
 // +kubebuilder:printcolumn:name="Ready",type=string,JSONPath=".status.conditions[?(@.type=='Ready')].status"
 // +kubebuilder:printcolumn:name="Superset",type=string,JSONPath=".status.supersetEndpoint"
+// +kubebuilder:printcolumn:name="Teable",type=string,JSONPath=".status.teableEndpoint"
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=".metadata.creationTimestamp"
 
 // Analytics is the Schema for the analytics API.

@@ -1,4 +1,4 @@
-# Optional shared Postgres for the LakeKeeper catalog, OpenFGA, and Superset.
+# Optional shared Postgres for the LakeKeeper catalog, OpenFGA, Superset, and Teable.
 # Each component uses its own database on this instance; the operators create
 # them on first start with an ensure-database init container, so Terraform does
 # not need a network path to the instance.

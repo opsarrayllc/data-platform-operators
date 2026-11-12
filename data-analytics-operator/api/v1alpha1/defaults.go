@@ -16,7 +16,12 @@ limitations under the License.
 
 package v1alpha1
 
-import corev1 "k8s.io/api/core/v1"
+import (
+	"net/url"
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+)
 
 // NamespaceOrDefault returns the namespace Superset runs in.
 func (s *AnalyticsSpec) NamespaceOrDefault() string {
@@ -38,9 +43,9 @@ func (s *PostgresSpec) StorageSizeOrDefault() string {
 	return stringOrDefault(s.StorageSize, DefaultPostgresStorage)
 }
 
-// DatabaseOrDefault returns the metadata database name.
-func (s *PostgresSpec) DatabaseOrDefault() string {
-	return stringOrDefault(s.Database, "superset")
+// DatabaseOr returns the database name, or fallback when unset.
+func (s *PostgresSpec) DatabaseOr(fallback string) string {
+	return stringOrDefault(s.Database, fallback)
 }
 
 // IsEmbedded reports whether Postgres should be operator-managed. Nil defaults to true.
@@ -173,6 +178,99 @@ func (s *CredentialsSecretRef) TrinoClientSecretKeyOrDefault() string {
 		return DefaultTrinoClientSecretKey
 	}
 	return stringOrDefault(s.TrinoClientSecretKey, DefaultTrinoClientSecretKey)
+}
+
+// TeableClientIDKeyOrDefault returns the Secret key for the Teable client id.
+func (s *CredentialsSecretRef) TeableClientIDKeyOrDefault() string {
+	if s == nil {
+		return DefaultTeableClientIDKey
+	}
+	return stringOrDefault(s.TeableClientIDKey, DefaultTeableClientIDKey)
+}
+
+// TeableClientSecretKeyOrDefault returns the Secret key for the Teable client secret.
+func (s *CredentialsSecretRef) TeableClientSecretKeyOrDefault() string {
+	if s == nil {
+		return DefaultTeableClientSecretKey
+	}
+	return stringOrDefault(s.TeableClientSecretKey, DefaultTeableClientSecretKey)
+}
+
+// IsEnabled reports whether Teable is deployed. Nil defaults to false.
+func (s *TeableSpec) IsEnabled() bool {
+	return s != nil && s.Enabled != nil && *s.Enabled
+}
+
+// NamespaceOrDefault returns the namespace Teable runs in.
+func (s *TeableSpec) NamespaceOrDefault() string {
+	return stringOrDefault(s.Namespace, DefaultTeableNamespace)
+}
+
+// ImageOrDefault returns the Teable image.
+func (s *TeableSpec) ImageOrDefault() string {
+	return stringOrDefault(s.Image, DefaultTeableImage)
+}
+
+// RegionOrDefault returns the S3 region.
+func (s *TeableStorageSpec) RegionOrDefault() string {
+	return stringOrDefault(s.Region, DefaultTeableS3Region)
+}
+
+// InternalEndpointOrDefault returns the S3 endpoint Teable calls from the cluster.
+func (s *TeableStorageSpec) InternalEndpointOrDefault() string {
+	return stringOrDefault(s.InternalEndpoint, s.Endpoint)
+}
+
+// IsForcePathStyle reports whether path-style addressing is on. Nil defaults to false.
+func (s *TeableStorageSpec) IsForcePathStyle() bool {
+	return s.ForcePathStyle != nil && *s.ForcePathStyle
+}
+
+// ShouldCreateBuckets reports whether the operator creates the buckets. Nil defaults to false.
+func (s *TeableStorageSpec) ShouldCreateBuckets() bool {
+	return s.CreateBuckets != nil && *s.CreateBuckets
+}
+
+// PublicBucketOrDefault returns the public bucket name.
+func (s *TeableStorageSpec) PublicBucketOrDefault() string {
+	return stringOrDefault(s.PublicBucket, DefaultTeablePublicBucket)
+}
+
+// PrivateBucketOrDefault returns the private bucket name.
+func (s *TeableStorageSpec) PrivateBucketOrDefault() string {
+	return stringOrDefault(s.PrivateBucket, DefaultTeablePrivateBucket)
+}
+
+// PublicURLOrDefault returns the browser URL of the public bucket. Teable
+// appends object paths to it as is, so it must include the bucket.
+func (s *TeableStorageSpec) PublicURLOrDefault() string {
+	if s.PublicURL != "" {
+		return strings.TrimRight(s.PublicURL, "/")
+	}
+	endpoint := strings.TrimRight(s.Endpoint, "/")
+	if endpoint == "" {
+		return ""
+	}
+	bucket := s.PublicBucketOrDefault()
+	if s.IsForcePathStyle() {
+		return endpoint + "/" + bucket
+	}
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return endpoint + "/" + bucket
+	}
+	u.Host = bucket + "." + u.Host
+	return u.String()
+}
+
+// AccessKeyIDKeyOrDefault returns the Secret key for the S3 access key id.
+func (s *S3CredentialsSecretRef) AccessKeyIDKeyOrDefault() string {
+	return stringOrDefault(s.AccessKeyIDKey, "AWS_ACCESS_KEY_ID")
+}
+
+// SecretAccessKeyKeyOrDefault returns the Secret key for the S3 secret access key.
+func (s *S3CredentialsSecretRef) SecretAccessKeyKeyOrDefault() string {
+	return stringOrDefault(s.SecretAccessKeyKey, "AWS_SECRET_ACCESS_KEY")
 }
 
 func stringOrDefault(value, fallback string) string {

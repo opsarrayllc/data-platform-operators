@@ -50,16 +50,31 @@ const (
 	componentSuperset         = "superset"
 	componentSupersetPostgres = "superset-postgres"
 	componentSupersetRedis    = "superset-redis"
+	componentTeable           = "teable"
+	componentTeablePostgres   = "teable-postgres"
+	componentTeableRedis      = "teable-redis"
 
-	namePostgres      = "postgres"
-	nameSuperset      = "superset"
-	nameSupersetRedis = "superset-redis"
+	namePostgres       = "postgres"
+	nameSuperset       = "superset"
+	nameSupersetRedis  = "superset-redis"
+	nameTeable         = "teable"
+	nameTeablePostgres = "teable-postgres"
+	nameTeableRedis    = "teable-redis"
 
 	secretPostgres         = "postgres"
 	secretPostgresExternal = "postgres-external"
 	secretSuperset         = "superset"
 	secretSupersetOIDC     = "superset-oidc"
 	configMapSuperset      = "superset-config"
+
+	// secretTeable holds Teable's generated keys, named as the env vars Teable reads.
+	secretTeable                 = "teable"
+	secretTeablePostgres         = "teable-postgres"
+	secretTeablePostgresExternal = "teable-postgres-external"
+	// secretTeableDatabase holds the assembled, URL-escaped PRISMA_DATABASE_URL.
+	secretTeableDatabase = "teable-database"
+	secretTeableStorage  = "teable-storage"
+	secretTeableOIDC     = "teable-oidc"
 	// configMapTrinoCA is the copy of Trino's CA in the Superset namespace.
 	configMapTrinoCA = "trino-ca"
 	keyTrinoCA       = "ca.crt"
@@ -87,6 +102,7 @@ const (
 
 	postgresPort = int32(5432)
 	supersetPort = int32(8088)
+	teablePort   = int32(3000)
 	redisPort    = int32(6379)
 
 	uidPostgres = int64(999)
@@ -95,6 +111,9 @@ const (
 	gidSuperset = int64(1000)
 	uidRedis    = int64(999)
 	gidRedis    = int64(999)
+	// uidTeable is the nodejs user the Teable image creates.
+	uidTeable = int64(1001)
+	gidTeable = int64(1001)
 
 	reasonReconciling = "Reconciling"
 	reasonReady       = "Ready"
@@ -102,13 +121,20 @@ const (
 	reasonError       = "Error"
 )
 
+// componentNames maps a component to its app.kubernetes.io/name label.
+var componentNames = map[string]string{
+	componentSuperset:         nameSuperset,
+	componentSupersetPostgres: namePostgres,
+	componentSupersetRedis:    nameSupersetRedis,
+	componentTeable:           nameTeable,
+	componentTeablePostgres:   nameTeablePostgres,
+	componentTeableRedis:      nameTeableRedis,
+}
+
 func labelsFor(a *analyticsv1alpha1.Analytics, component string) map[string]string {
-	name := nameSuperset
-	switch component {
-	case componentSupersetPostgres:
-		name = namePostgres
-	case componentSupersetRedis:
-		name = nameSupersetRedis
+	name, ok := componentNames[component]
+	if !ok {
+		name = nameSuperset
 	}
 	return map[string]string{
 		labelAppName:      name,

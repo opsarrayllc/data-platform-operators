@@ -98,7 +98,7 @@ variable "tags" {
 }
 
 variable "create_postgres" {
-  description = "Create an RDS for PostgreSQL instance for the LakeKeeper catalog, OpenFGA, and Superset. Each gets its own database on it."
+  description = "Create an RDS for PostgreSQL instance for the LakeKeeper catalog, OpenFGA, Superset, and Teable. Each gets its own database on it."
   type        = bool
   default     = false
 }
@@ -159,4 +159,27 @@ variable "postgres_credentials_secret_namespace" {
   description = "Namespace of the Postgres credentials Secret."
   type        = string
   default     = "lakekeeper"
+}
+
+variable "create_teable" {
+  description = "Create Teable's attachment buckets and an IAM user whose access key Teable uses. Teable's S3 client only takes static keys, so this is the module's one long-lived credential."
+  type        = bool
+  default     = false
+}
+
+variable "teable_bucket_prefix" {
+  description = "Prefix for Teable's buckets, <prefix>-public and <prefix>-private. Must be globally unique. Defaults to <bucket_name>-teable."
+  type        = string
+  default     = null
+
+  validation {
+    condition     = var.teable_bucket_prefix == null || can(regex("^[a-z0-9][a-z0-9-]{1,53}[a-z0-9]$", var.teable_bucket_prefix))
+    error_message = "teable_bucket_prefix must be 3-55 characters of lowercase letters, digits, and hyphens, and must start and end with a letter or digit."
+  }
+}
+
+variable "teable_public_url" {
+  description = "Teable's browser URL (Analytics spec.teable.publicURL), such as https://teable.example.com. The buckets allow cross-origin uploads and downloads from this origin only. Required when create_teable is true."
+  type        = string
+  default     = null
 }

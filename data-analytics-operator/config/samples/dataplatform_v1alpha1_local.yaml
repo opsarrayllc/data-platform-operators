@@ -6,6 +6,11 @@
 #
 # Superset: https://superset.data-platform.local (Keycloak login). The first
 # Trino query may prompt a one-time OAuth consent.
+#
+# Teable: https://teable.data-platform.local (Keycloak login). Attachments go
+# to the lake's MinIO, which browsers reach at https://minio-api.data-platform.local.
+# The operator creates the buckets with MinIO's root credentials, which is fine
+# for kind only. Teable data is never exposed to Trino or Superset.
 apiVersion: dataplatform.opsarray.io/v1alpha1
 kind: Analytics
 metadata:
@@ -26,3 +31,16 @@ spec:
       credentialsSecretRef:
         name: oidc
         namespace: keycloak
+  teable:
+    enabled: true
+    publicURL: https://teable.data-platform.local
+    postgres:
+      storageSize: 1Gi
+    storage:
+      endpoint: https://minio-api.data-platform.local
+      internalEndpoint: http://minio.minio.svc:9000
+      forcePathStyle: true
+      createBuckets: true
+      credentialsSecretRef:
+        name: minio
+        namespace: minio
