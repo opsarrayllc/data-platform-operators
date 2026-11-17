@@ -48,6 +48,9 @@ type DataLakeReconciler struct {
 	// HTTPClient calls external directories such as JumpCloud. Nil uses a
 	// client with a 30s timeout.
 	HTTPClient *http.Client
+	// ServiceAccountIssuer reads the cluster's ServiceAccount token issuer, so
+	// Trino can accept those tokens. Needed only with serviceAccountTokens.
+	ServiceAccountIssuer ServiceAccountIssuer
 }
 
 // syncsAccessGroups reports whether LakeKeeper role membership is synced from
@@ -70,6 +73,7 @@ func syncsAccessGroups(dp *dataplatformv1alpha1.DataLake) bool {
 // +kubebuilder:rbac:groups="",resources=serviceaccounts/token,verbs=create
 // +kubebuilder:rbac:groups=rbac.authorization.k8s.io,resources=clusterrolebindings,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=authentication.k8s.io,resources=tokenreviews,verbs=create
+// +kubebuilder:rbac:urls=/.well-known/openid-configuration;/openid/v1/jwks,verbs=get
 // +kubebuilder:rbac:groups=authorization.k8s.io,resources=subjectaccessreviews,verbs=create
 // +kubebuilder:rbac:groups=apps,resources=deployments;statefulsets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=batch,resources=jobs,verbs=get;list;watch;create;update;patch;delete

@@ -121,9 +121,10 @@ var _ = Describe("DataLake Controller", func() {
 	BeforeEach(func() {
 		catalog = &fakeCatalog{}
 		reconciler = &DataLakeReconciler{
-			Client:  k8sClient,
-			Scheme:  k8sClient.Scheme(),
-			Catalog: catalog,
+			Client:               k8sClient,
+			Scheme:               k8sClient.Scheme(),
+			Catalog:              catalog,
+			ServiceAccountIssuer: newFakeSAIssuer(GinkgoT()),
 		}
 
 		By("creating the DataLake")
@@ -616,6 +617,19 @@ var _ = Describe("DataLake Controller", func() {
 		proxy := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTokenProxy, Namespace: nameTrino}, proxy)).To(Succeed())
 		Expect(proxy.Data[keyTokenProxyScript]).To(ContainSubstring(`"access_token":"%s"`))
+
+		By("letting ServiceAccounts sign in to Trino with their tokens")
+		trinoCfg := &corev1.Secret{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: secretTrinoConfig, Namespace: nameTrino}, trinoCfg)).To(Succeed())
+		coord := string(trinoCfg.Data["config.properties.coordinator"])
+		Expect(coord).To(ContainSubstring("http-server.authentication.type=oauth2,jwt\n"))
+		Expect(coord).To(ContainSubstring("http-server.authentication.jwt.required-issuer=" + fakeSAIssuerURL + "\n"))
+		Expect(coord).To(ContainSubstring("http-server.authentication.jwt.required-audience=lakekeeper\n"))
+		Expect(string(trinoCfg.Data["config.properties.worker"])).NotTo(ContainSubstring("jwt"))
+		jwtKeys := &corev1.ConfigMap{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapTrinoJWTKeys, Namespace: nameTrino}, jwtKeys)).To(Succeed())
+		Expect(jwtKeys.Data).To(HaveKey("rsa-kid_1.pem"))
+		Expect(pod.Volumes).To(ContainElement(HaveField("Name", volumeTrinoJWTKeys)))
 
 		By("pointing OPA at its own sidecar")
 		opa := &appsv1.Deployment{}

@@ -98,6 +98,12 @@ With `serviceAccountTokens`, the operator does the following:
         icebergNamespaces: [google_analytics]
   ```
 
+- **Querying Trino as a ServiceAccount:** the same workloads can send SQL to Trino with their projected token, e.g. a dbt-trino runner using `method: jwt`. Use the Trino HTTPS endpoint and audience `lakekeeper`.
+  - The coordinator accepts `oauth2,jwt`. It checks each token against the cluster's ServiceAccount issuer and its signing keys.
+  - The operator reads those keys from the API server (`/.well-known/openid-configuration`, `/openid/v1/jwks`). It writes them to the `trino-jwt-keys` ConfigMap, one `<kid>.pem` per key, so a key rotation reaches Trino without a restart.
+  - The Trino user is the token subject, `system:serviceaccount:<namespace>:<name>`. The OPA policy maps it to the LakeKeeper principal `kubernetes~system:serviceaccount:<namespace>:<name>`, so a grant above also covers SQL through Trino.
+  - Trino's OAuth2 login rejects OIDC subjects that start with `system:serviceaccount:`, so an identity-provider user can't pose as a ServiceAccount.
+
 ### LakeKeeper UI sign-in
 
 JumpCloud issues opaque access tokens, and publishes no introspection endpoint. LakeKeeper validates bearer tokens as JWTs, so it rejects them with `No authenticator can handle the provided token`. With `uiTokenType: id_token`, the UI sends the ID token instead. That token is a JWT signed by the issuer, and its `aud` is the lakekeeper client ID, so `audience` must be that client ID.
