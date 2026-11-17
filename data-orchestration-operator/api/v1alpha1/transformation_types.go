@@ -27,7 +27,7 @@ const (
 	// in place in the Orchestration's namespace.
 	ConditionTransformationReady = "Ready"
 
-	DefaultTransformationImage     = "ghcr.io/opsarrayllc/data-platform-dbt-runner:0.11.0"
+	DefaultTransformationImage     = "ghcr.io/opsarrayllc/data-platform-dbt-runner:0.12.0"
 	DefaultTransformationGitRef    = "main"
 	DefaultTransformationGitKey    = "token"
 	DefaultTransformationDBTTarget = "prod"
