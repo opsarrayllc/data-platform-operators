@@ -11,11 +11,18 @@ repo: github.com/opsarrayllc/data-orchestration-operator
 resources:
 - api:
     crdVersion: v1
-    namespaced: false
   controller: true
   domain: opsarray.io
   group: dataplatform
   kind: Orchestration
+  path: github.com/opsarrayllc/data-orchestration-operator/api/v1alpha1
+  version: v1alpha1
+- api:
+    crdVersion: v1
+  controller: true
+  domain: opsarray.io
+  group: dataplatform
+  kind: Transformation
   path: github.com/opsarrayllc/data-orchestration-operator/api/v1alpha1
   version: v1alpha1
 version: "3"

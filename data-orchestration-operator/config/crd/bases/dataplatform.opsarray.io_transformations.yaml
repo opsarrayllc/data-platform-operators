@@ -1,0 +1,630 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.21.0
+  name: transformations.dataplatform.opsarray.io
+spec:
+  group: dataplatform.opsarray.io
+  names:
+    kind: Transformation
+    listKind: TransformationList
+    plural: transformations
+    singular: transformation
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.conditions[?(@.type=='Ready')].status
+      name: Ready
+      type: string
+    - jsonPath: .status.namespace
+      name: Namespace
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Transformation is the Schema for the transformations API. It runs a dbt
+          project on Trino through Argo CronWorkflows, one per lane.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: spec defines the desired state of Transformation
+            properties:
+              env:
+                description: env is added to the runner container after the operator's
+                  variables.
+                items:
+                  description: EnvVar represents an environment variable present in
+                    a Container.
+                  properties:
+                    name:
+                      description: |-
+                        Name of the environment variable.
+                        May consist of any printable ASCII characters except '='.
+                      type: string
+                    value:
+                      description: |-
+                        Variable references $(VAR_NAME) are expanded
+                        using the previously defined environment variables in the container and
+                        any service environment variables. If a variable cannot be resolved,
+                        the reference in the input string will be unchanged. Double $$ are reduced
+                        to a single $, which allows for escaping the $(VAR_NAME) syntax: i.e.
+                        "$$(VAR_NAME)" will produce the string literal "$(VAR_NAME)".
+                        Escaped references will never be expanded, regardless of whether the variable
+                        exists or not.
+                        Defaults to "".
+                      type: string
+                    valueFrom:
+                      description: Source for the environment variable's value. Cannot
+                        be used if value is not empty.
+                      properties:
+                        configMapKeyRef:
+                          description: Selects a key of a ConfigMap.
+                          properties:
+                            key:
+                              description: The key to select.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the ConfigMap or its key
+                                must be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fieldRef:
+                          description: |-
+                            Selects a field of the pod: supports metadata.name, metadata.namespace, `metadata.labels['<KEY>']`, `metadata.annotations['<KEY>']`,
+                            spec.nodeName, spec.serviceAccountName, status.hostIP, status.podIP, status.podIPs.
+                          properties:
+                            apiVersion:
+                              description: Version of the schema the FieldPath is
+                                written in terms of, defaults to "v1".
+                              type: string
+                            fieldPath:
+                              description: Path of the field to select in the specified
+                                API version.
+                              type: string
+                          required:
+                          - fieldPath
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        fileKeyRef:
+                          description: |-
+                            FileKeyRef selects a key of the env file.
+                            Requires the EnvFiles feature gate to be enabled.
+                          properties:
+                            key:
+                              description: |-
+                                The key within the env file. An invalid key will prevent the pod from starting.
+                                The keys defined within a source may consist of any printable ASCII characters except '='.
+                                During Alpha stage of the EnvFiles feature gate, the key size is limited to 128 characters.
+                              type: string
+                            optional:
+                              default: false
+                              description: |-
+                                Specify whether the file or its key must be defined. If the file or key
+                                does not exist, then the env var is not published.
+                                If optional is set to true and the specified key does not exist,
+                                the environment variable will not be set in the Pod's containers.
+
+                                If optional is set to false and the specified key does not exist,
+                                an error will be returned during Pod creation.
+                              type: boolean
+                            path:
+                              description: |-
+                                The path within the volume from which to select the file.
+                                Must be relative and may not contain the '..' path or start with '..'.
+                              type: string
+                            volumeName:
+                              description: The name of the volume mount containing
+                                the env file.
+                              type: string
+                          required:
+                          - key
+                          - path
+                          - volumeName
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        resourceFieldRef:
+                          description: |-
+                            Selects a resource of the container: only resources limits and requests
+                            (limits.cpu, limits.memory, limits.ephemeral-storage, requests.cpu, requests.memory and requests.ephemeral-storage) are currently supported.
+                          properties:
+                            containerName:
+                              description: 'Container name: required for volumes,
+                                optional for env vars'
+                              type: string
+                            divisor:
+                              anyOf:
+                              - type: integer
+                              - type: string
+                              description: Specifies the output format of the exposed
+                                resources, defaults to "1"
+                              pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                              x-kubernetes-int-or-string: true
+                            resource:
+                              description: 'Required: resource to select'
+                              type: string
+                          required:
+                          - resource
+                          type: object
+                          x-kubernetes-map-type: atomic
+                        secretKeyRef:
+                          description: Selects a key of a secret in the pod's namespace
+                          properties:
+                            key:
+                              description: The key of the secret to select from.  Must
+                                be a valid secret key.
+                              type: string
+                            name:
+                              default: ""
+                              description: |-
+                                Name of the referent.
+                                This field is effectively required, but due to backwards compatibility is
+                                allowed to be empty. Instances of this type with an empty value here are
+                                almost certainly wrong.
+                                More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                              type: string
+                            optional:
+                              description: Specify whether the Secret or its key must
+                                be defined
+                              type: boolean
+                          required:
+                          - key
+                          type: object
+                          x-kubernetes-map-type: atomic
+                      type: object
+                  required:
+                  - name
+                  type: object
+                type: array
+              image:
+                description: |-
+                  image is the runner image: dbt-core, dbt-trino and the opsarray
+                  entrypoint. Defaults to ghcr.io/opsarrayllc/data-platform-dbt-runner.
+                type: string
+              lanes:
+                description: |-
+                  lanes are independent schedules, each running a dbt selection. Use a
+                  fast onChange lane for near-live models and slower scheduled lanes for
+                  heavy or daily ones. Lanes run independently; keep their selections
+                  disjoint so two lanes never write the same table.
+                items:
+                  description: LaneSpec is one schedule running one dbt selection.
+                  properties:
+                    activeDeadlineSeconds:
+                      description: activeDeadlineSeconds stops a run that takes longer.
+                        Defaults to 3600.
+                      format: int64
+                      minimum: 60
+                      type: integer
+                    command:
+                      description: command is the dbt command. Defaults to "run".
+                      enum:
+                      - run
+                      - build
+                      - test
+                      - snapshot
+                      - seed
+                      type: string
+                    exclude:
+                      description: exclude is passed to dbt as --exclude.
+                      type: string
+                    fullRefresh:
+                      description: fullRefresh passes --full-refresh, rebuilding incremental
+                        models.
+                      type: boolean
+                    name:
+                      description: |-
+                        name identifies the lane. The lane's CronWorkflow is named
+                        <transformation>-<lane>.
+                      maxLength: 20
+                      minLength: 1
+                      pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                      type: string
+                    onChange:
+                      description: onChange runs the lane soon after its source tables
+                        change.
+                      properties:
+                        pollSchedule:
+                          description: |-
+                            pollSchedule is how often to check for changes, as a cron expression.
+                            A check with no change exits without running dbt. Defaults to every
+                            minute.
+                          type: string
+                        sources:
+                          description: |-
+                            sources are Iceberg namespaces ("sales") or tables
+                            ("sales.orders") in the Trino catalog to watch.
+                          items:
+                            pattern: ^[a-z0-9_]+(\.[a-z0-9_]+)*$
+                            type: string
+                          minItems: 1
+                          type: array
+                          x-kubernetes-list-type: set
+                      required:
+                      - sources
+                      type: object
+                    schedule:
+                      description: schedule is a cron expression; the lane runs on
+                        it.
+                      minLength: 1
+                      type: string
+                    select:
+                      description: select is passed to dbt as --select, e.g. "tag:live".
+                      minLength: 1
+                      type: string
+                    suspend:
+                      description: suspend pauses this lane.
+                      type: boolean
+                    timezone:
+                      description: timezone for the schedule, e.g. America/New_York.
+                        Defaults to UTC.
+                      type: string
+                  required:
+                  - name
+                  - select
+                  type: object
+                  x-kubernetes-validations:
+                  - message: set exactly one of schedule or onChange
+                    rule: has(self.schedule) != has(self.onChange)
+                maxItems: 10
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              maintenance:
+                description: |-
+                  maintenance compacts and expires snapshots of the Iceberg tables this
+                  project writes. Frequent small writes leave many small files, which
+                  slow every read until they are compacted.
+                properties:
+                  fileSizeThreshold:
+                    description: |-
+                      fileSizeThreshold: files smaller than this are rewritten by optimize.
+                      Defaults to 128MB.
+                    pattern: ^[0-9]+(B|kB|MB|GB)$
+                    type: string
+                  namespaces:
+                    description: |-
+                      namespaces are the Iceberg namespaces whose tables are maintained,
+                      normally the ones this project writes.
+                    items:
+                      pattern: ^[a-z0-9_]+(\.[a-z0-9_]+)*$
+                      type: string
+                    minItems: 1
+                    type: array
+                    x-kubernetes-list-type: set
+                  schedule:
+                    description: schedule is a cron expression. Defaults to every
+                      six hours.
+                    type: string
+                  snapshotRetention:
+                    description: |-
+                      snapshotRetention is how long expired snapshots are kept for time
+                      travel, as a Trino duration. Defaults to 7d.
+                    pattern: ^[0-9]+(m|h|d)$
+                    type: string
+                  suspend:
+                    description: suspend pauses maintenance.
+                    type: boolean
+                required:
+                - namespaces
+                type: object
+              orchestrationRef:
+                description: |-
+                  orchestrationRef is the name of the Orchestration whose Argo Workflows
+                  runs this project. Workflows run in that Orchestration's namespace.
+                  Defaults to the only Orchestration in the cluster.
+                type: string
+              project:
+                description: project is where the dbt project lives.
+                properties:
+                  git:
+                    description: git is the repository holding the dbt project.
+                    properties:
+                      credentialsSecretRef:
+                        description: |-
+                          credentialsSecretRef names a Secret in the Orchestration's namespace
+                          holding an HTTPS access token. Omit it for public repositories.
+                        properties:
+                          key:
+                            description: key holding the value. Defaults to "token".
+                            type: string
+                          name:
+                            description: name of the Secret.
+                            minLength: 1
+                            type: string
+                        required:
+                        - name
+                        type: object
+                      path:
+                        description: |-
+                          path is the directory holding dbt_project.yml, relative to the
+                          repository root. Defaults to the root.
+                        type: string
+                      ref:
+                        description: ref is the branch or tag to check out. Defaults
+                          to "main".
+                        type: string
+                      url:
+                        description: url is the HTTPS clone URL.
+                        pattern: ^https://
+                        type: string
+                    required:
+                    - url
+                    type: object
+                required:
+                - git
+                type: object
+              resources:
+                description: resources for the runner container.
+                properties:
+                  claims:
+                    description: |-
+                      Claims lists the names of resources, defined in spec.resourceClaims,
+                      that are used by this container.
+
+                      This field depends on the
+                      DynamicResourceAllocation feature gate.
+
+                      This field is immutable. It can only be set for containers.
+                    items:
+                      description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                      properties:
+                        name:
+                          description: |-
+                            Name must match the name of one entry in pod.spec.resourceClaims of
+                            the Pod where this field is used. It makes that resource available
+                            inside a container.
+                          type: string
+                        request:
+                          description: |-
+                            Request is the name chosen for a request in the referenced claim.
+                            If empty, everything from the claim is made available, otherwise
+                            only the result of this request.
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                    x-kubernetes-list-map-keys:
+                    - name
+                    x-kubernetes-list-type: map
+                  limits:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Limits describes the maximum amount of compute resources allowed.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                  requests:
+                    additionalProperties:
+                      anyOf:
+                      - type: integer
+                      - type: string
+                      pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                      x-kubernetes-int-or-string: true
+                    description: |-
+                      Requests describes the minimum amount of compute resources required.
+                      If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                      otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                      More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                    type: object
+                type: object
+              suspend:
+                description: suspend pauses every lane and maintenance without deleting
+                  them.
+                type: boolean
+              target:
+                description: target is the dbt target name, passed as --target. Defaults
+                  to "prod".
+                type: string
+              trino:
+                description: |-
+                  trino is how the runner reaches Trino. It signs in with its pod's
+                  ServiceAccount token, so the DataLake must have
+                  spec.auth.serviceAccountTokens set, and a grant for the ServiceAccount
+                  reported in status.serviceAccount.
+                properties:
+                  caConfigMapRef:
+                    description: |-
+                      caConfigMapRef locates the CA that signs Trino's certificate. The
+                      operator copies it next to the workflows. Defaults to the data lake
+                      operator's trino-ca ConfigMap (key ca.crt) in the trino namespace.
+                    properties:
+                      key:
+                        description: key holding the PEM certificate. Defaults to
+                          ca.crt.
+                        type: string
+                      name:
+                        description: name of the ConfigMap. Defaults to trino-ca.
+                        type: string
+                      namespace:
+                        description: namespace of the ConfigMap. Defaults to trino.
+                        type: string
+                    type: object
+                  catalog:
+                    description: catalog is the Iceberg catalog dbt writes to. Defaults
+                      to "lakekeeper".
+                    type: string
+                  host:
+                    description: host is Trino's HTTPS host. Defaults to trino.trino.svc.
+                    type: string
+                  port:
+                    description: port is Trino's HTTPS port. Defaults to 8443.
+                    format: int32
+                    maximum: 65535
+                    minimum: 1
+                    type: integer
+                  tokenAudience:
+                    description: |-
+                      tokenAudience is the audience of the ServiceAccount token the runner
+                      presents. It must match the DataLake's serviceAccountTokens.audience.
+                      Defaults to "lakekeeper".
+                    type: string
+                type: object
+              vars:
+                additionalProperties:
+                  type: string
+                description: vars are passed to dbt as --vars.
+                type: object
+            required:
+            - lanes
+            - project
+            type: object
+          status:
+            description: status defines the observed state of Transformation
+            properties:
+              conditions:
+                description: |-
+                  conditions represent the current state of the Transformation.
+
+                  - "Ready": every lane's CronWorkflow is in place
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              lanes:
+                description: lanes report each lane's CronWorkflow, including maintenance.
+                items:
+                  description: LaneStatus is copied from the lane's CronWorkflow status.
+                  properties:
+                    active:
+                      description: active is how many of the lane's workflows are
+                        running.
+                      format: int32
+                      type: integer
+                    cronWorkflow:
+                      description: cronWorkflow is the CronWorkflow's name.
+                      type: string
+                    failed:
+                      description: failed counts failed workflows.
+                      format: int64
+                      type: integer
+                    lastScheduledTime:
+                      description: lastScheduledTime is when the lane last started
+                        a workflow.
+                      format: date-time
+                      type: string
+                    name:
+                      description: name of the lane, or "maintenance".
+                      type: string
+                    succeeded:
+                      description: succeeded counts successful workflows.
+                      format: int64
+                      type: integer
+                  required:
+                  - name
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              namespace:
+                description: namespace is where the workflows run.
+                type: string
+              serviceAccount:
+                description: |-
+                  serviceAccount is the runner's identity, as
+                  system:serviceaccount:<namespace>:<name>. Grant it Iceberg
+                  namespaces through the DataLake's serviceAccountTokens.grants.
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

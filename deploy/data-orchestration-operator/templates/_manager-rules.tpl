@@ -118,6 +118,7 @@
   - dataplatform.opsarray.io
   resources:
   - orchestrations
+  - transformations
   verbs:
   - create
   - delete
@@ -130,12 +131,14 @@
   - dataplatform.opsarray.io
   resources:
   - orchestrations/finalizers
+  - transformations/finalizers
   verbs:
   - update
 - apiGroups:
   - dataplatform.opsarray.io
   resources:
   - orchestrations/status
+  - transformations/status
   verbs:
   - get
   - patch
