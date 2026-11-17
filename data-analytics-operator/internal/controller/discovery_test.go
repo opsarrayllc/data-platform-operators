@@ -97,6 +97,7 @@ func TestSupersetConfigGenericOIDC(t *testing.T) {
 		`"authorize_url": "https://oauth.id.jumpcloud.com/oauth2/auth"`,
 		`"token_request_uri": "https://oauth.id.jumpcloud.com/oauth2/token"`,
 		`connect_args["user"] = username`,
+		`"data-engineers": ["Alpha", "sql_lab"],`,
 	} {
 		if !strings.Contains(cfg, want) {
 			t.Errorf("superset config missing %s", want)

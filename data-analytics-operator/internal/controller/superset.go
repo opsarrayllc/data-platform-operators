@@ -419,7 +419,7 @@ func supersetConfig(
 		b.WriteString("AUTH_ROLES_SYNC_AT_LOGIN = True\n")
 		b.WriteString("AUTH_ROLES_MAPPING = {\n")
 		b.WriteString(fmt.Sprintf("    %q: [\"Admin\"],\n", analyticsv1alpha1.DefaultGroupPlatformAdmins))
-		b.WriteString(fmt.Sprintf("    %q: [\"Alpha\"],\n", analyticsv1alpha1.DefaultGroupDataEngineers))
+		b.WriteString(fmt.Sprintf("    %q: [\"Alpha\", \"sql_lab\"],\n", analyticsv1alpha1.DefaultGroupDataEngineers))
 		b.WriteString(fmt.Sprintf("    %q: [\"Gamma\"],\n", analyticsv1alpha1.DefaultGroupAnalysts))
 		b.WriteString("}\n")
 		providerName := oauthProviderKeycloak

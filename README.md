@@ -175,7 +175,7 @@ still go through LakeKeeper's UI or OpenFGA tuples; the groups are the starting
 set of personas, not a replacement for those APIs.
 
 The analytics operator maps the same groups to Superset roles (`platform-admins` → Admin,
-`data-engineers` → Alpha, `analysts` → Gamma). Charts and SQL Lab query Trino
+`data-engineers` → Alpha + sql_lab, `analysts` → Gamma). Charts and SQL Lab query Trino
 with a per-user OAuth2 token, so catalog, row-filter, and column-mask policies
 still apply. The first Trino query after login may prompt a one-time Keycloak
 consent.

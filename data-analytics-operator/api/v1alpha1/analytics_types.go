@@ -434,7 +434,7 @@ type OIDCSpec struct {
 
 	// groupsClaim is the ID token or userinfo claim that lists the user's
 	// groups. Group names map to Superset roles: platform-admins to Admin,
-	// data-engineers to Alpha, analysts to Gamma. In JumpCloud, set the
+	// data-engineers to Alpha and sql_lab, analysts to Gamma. In JumpCloud, set the
 	// application's group attribute name to this value. Defaults to "groups".
 	// +optional
 	GroupsClaim string `json:"groupsClaim,omitempty"`
