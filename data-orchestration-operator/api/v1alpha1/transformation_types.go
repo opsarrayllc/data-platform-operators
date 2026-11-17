@@ -261,8 +261,8 @@ type LaneSpec struct {
 // OnChangeSpec polls source tables and runs the lane only when one has a
 // new Iceberg snapshot since the last successful run.
 type OnChangeSpec struct {
-	// sources are Iceberg namespaces ("atlantis") or tables
-	// ("atlantis.atlantis_public_orders") in the Trino catalog to watch.
+	// sources are Iceberg namespaces ("sales") or tables
+	// ("sales.orders") in the Trino catalog to watch.
 	// +required
 	// +kubebuilder:validation:MinItems=1
 	// +listType=set

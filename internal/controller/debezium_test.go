@@ -25,7 +25,7 @@ func parseProperties(t *testing.T, s string) map[string]string {
 func TestDebeziumPropertiesPostgresKeycloak(t *testing.T) {
 	dp := &dataplatformv1alpha1.DataLake{}
 	dp.Name = "lake"
-	dp.Spec.Lakekeeper.Warehouse.Name = "keyme"
+	dp.Spec.Lakekeeper.Warehouse.Name = "acme"
 	src := &dataplatformv1alpha1.DebeziumSourceSpec{
 		Name:             "billing",
 		Connector:        dataplatformv1alpha1.DebeziumConnectorPostgreSQL,
@@ -61,7 +61,7 @@ func TestDebeziumPropertiesPostgresKeycloak(t *testing.T) {
 		"debezium.source.message.prefix.exclude.list": "debezium-heartbeat",
 		"debezium.source.table.include.list":          "public.invoices,public.payments",
 		"debezium.source.database.sslmode":            "require",
-		"debezium.sink.iceberg.warehouse":             "keyme",
+		"debezium.sink.iceberg.warehouse":             "acme",
 		"debezium.sink.iceberg.table-namespace":       "raw.billing",
 		// extraProperties win over generated keys.
 		"debezium.sink.iceberg.upsert":                               "true",

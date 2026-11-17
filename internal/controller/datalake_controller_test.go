@@ -812,8 +812,8 @@ var _ = Describe("DataLake Controller", func() {
 			Expect(err.Error()).To(ContainSubstring("catalog must not be"))
 		}
 		ok := &dataplatformv1alpha1.DataLake{
-			ObjectMeta: metav1.ObjectMeta{Name: "catalog-keyme"},
-			Spec:       dataplatformv1alpha1.DataLakeSpec{Trino: dataplatformv1alpha1.TrinoSpec{Catalog: "keyme"}},
+			ObjectMeta: metav1.ObjectMeta{Name: "catalog-acme"},
+			Spec:       dataplatformv1alpha1.DataLakeSpec{Trino: dataplatformv1alpha1.TrinoSpec{Catalog: "acme"}},
 		}
 		Expect(k8sClient.Create(ctx, ok)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, ok)).To(Succeed())

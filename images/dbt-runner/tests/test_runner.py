@@ -13,10 +13,10 @@ from dbt_runner import config as cfg
 from dbt_runner import maintain, project, state, trino_conn, watch
 
 BASE_ENV = {
-    "TRANSFORM_NAME": "keyme",
+    "TRANSFORM_NAME": "acme",
     "TRANSFORM_LANE": "live",
     "TRANSFORM_NAMESPACE": "argo",
-    "TRANSFORM_STATE_CONFIGMAP": "transform-keyme-state",
+    "TRANSFORM_STATE_CONFIGMAP": "transform-acme-state",
     "TRINO_HOST": "trino.trino.svc",
     "TRINO_PORT": "8443",
     "TRINO_CATALOG": "lakekeeper",
@@ -24,7 +24,7 @@ BASE_ENV = {
     "DBT_COMMAND": "build",
     "DBT_SELECT": "tag:live  tag:core",
     "DBT_VARS": '{"b": 1, "a": "x"}',
-    "WATCH_SOURCES": "atlantis,lks.lks_public_users",
+    "WATCH_SOURCES": "sales,crm.customers",
     "HOME": "/work",
 }
 
@@ -40,9 +40,9 @@ def test_load():
     c = conf()
     assert c.dbt.select == ("tag:live", "tag:core")
     assert c.dbt.vars == '{"a": "x", "b": 1}'
-    assert c.dbt.schema == "keyme"
+    assert c.dbt.schema == "acme"
     assert c.dbt.target == "prod"
-    assert c.watch_sources == ("atlantis", "lks.lks_public_users")
+    assert c.watch_sources == ("sales", "crm.customers")
     assert c.trino.token_file == "/var/run/secrets/opsarray/token"
     assert "s3cr3t" not in repr(cfg.load("run", {**BASE_ENV, "PROJECT_GIT_TOKEN": "s3cr3t"}))
 
@@ -86,7 +86,7 @@ def test_dbt_args():
 
 def test_profiles():
     c = conf(DBT_SCHEMA="analytics")
-    out = project.profiles("keyme", c.dbt, c.trino)["keyme"]
+    out = project.profiles("acme", c.dbt, c.trino)["acme"]
     assert out["target"] == "prod"
     assert out["outputs"]["prod"] == {
         "type": "trino",
@@ -243,24 +243,24 @@ class FakeCursor:
         pass
 
 
-TABLES = [("atlantis", "a"), ("atlantis", "b"), ("lks", "lks_public_users"), ("lks", "other")]
+TABLES = [("sales", "a"), ("sales", "b"), ("crm", "customers"), ("crm", "other")]
 
 
 def test_split_sources():
-    assert watch.split_sources(["atlantis", "lks.users"]) == (["atlantis"], [("lks", "users")])
+    assert watch.split_sources(["sales", "crm.users"]) == (["sales"], [("crm", "users")])
 
 
 def test_resolve(caplog):
     conn = FakeConn(TABLES)
-    got = watch.resolve(conn, "lakekeeper", ["atlantis", "lks.lks_public_users", "lks.missing", "empty"])
-    assert got == [("atlantis", "a"), ("atlantis", "b"), ("lks", "lks_public_users")]
-    assert "lks.missing" in caplog.text and "empty" in caplog.text
+    got = watch.resolve(conn, "lakekeeper", ["sales", "crm.customers", "crm.missing", "empty"])
+    assert got == [("crm", "customers"), ("sales", "a"), ("sales", "b")]
+    assert "crm.missing" in caplog.text and "empty" in caplog.text
 
 
 def test_snapshots_sql():
-    sql = watch.snapshots_sql("lakekeeper", [("atlantis", "a"), ("lks", "u")])
+    sql = watch.snapshots_sql("lakekeeper", [("sales", "a"), ("crm", "u")])
     assert sql.count("UNION ALL") == 1
-    assert '"lakekeeper"."atlantis"."a$snapshots"' in sql
+    assert '"lakekeeper"."sales"."a$snapshots"' in sql
     assert "operation <> 'replace'" in sql
     assert "max_by(snapshot_id, committed_at)" in sql
 
@@ -318,14 +318,14 @@ class FakeSession:
 
 def test_kube_configmap():
     session = FakeSession({"live.json": "x"})
-    cm = state.KubeConfigMap("argo", "transform-keyme-state", session=session, base_url="https://k8s",
+    cm = state.KubeConfigMap("argo", "transform-acme-state", session=session, base_url="https://k8s",
                              token=lambda: "tok", verify=False)
     assert cm.get("live.json") == "x"
     assert cm.get("other.json") is None
     cm.set("live.json", "y")
     assert session.data["live.json"] == "y"
     method, url, headers = session.calls[-1]
-    assert url == "https://k8s/api/v1/namespaces/argo/configmaps/transform-keyme-state"
+    assert url == "https://k8s/api/v1/namespaces/argo/configmaps/transform-acme-state"
     assert headers == {"Authorization": "Bearer tok", "Content-Type": "application/merge-patch+json"}
 
 
@@ -333,7 +333,7 @@ def test_kube_configmap():
 def on_change_env(monkeypatch):
     """on_change with a fake Trino, a fake ConfigMap and dbt stubbed out."""
     session = FakeSession()
-    conn = FakeConn(TABLES, {"atlantis.a": "1", "atlantis.b": "2", "lks.lks_public_users": "3"})
+    conn = FakeConn(TABLES, {"sales.a": "1", "sales.b": "2", "crm.customers": "3"})
     dbt_calls = []
     result = {"ok": True}
 
@@ -360,22 +360,22 @@ def test_on_change(on_change_env):
     assert runner.on_change(c) == 0
     assert dbt_calls == ["live"]
     assert state.decode(session.data["live.json"]) == {
-        "atlantis.a": "1", "atlantis.b": "2", "lks.lks_public_users": "3"}
+        "sales.a": "1", "sales.b": "2", "crm.customers": "3"}
 
     # Nothing new: dbt does not run.
     assert runner.on_change(c) == 0
     assert dbt_calls == ["live"]
 
     # A new commit, but dbt fails: state is unchanged so the next tick retries.
-    conn.snapshots["atlantis.b"] = "5"
+    conn.snapshots["sales.b"] = "5"
     result["ok"] = False
     assert runner.on_change(c) == 1
-    assert state.decode(session.data["live.json"])["atlantis.b"] == "2"
+    assert state.decode(session.data["live.json"])["sales.b"] == "2"
 
     result["ok"] = True
     assert runner.on_change(c) == 0
     assert dbt_calls == ["live", "live", "live"]
-    assert state.decode(session.data["live.json"])["atlantis.b"] == "5"
+    assert state.decode(session.data["live.json"])["sales.b"] == "5"
 
 
 def test_on_change_nothing_to_watch(on_change_env):
@@ -397,11 +397,11 @@ def test_statements():
 
 
 def test_maintain_continues_after_failure():
-    conn = FakeConn(TABLES, fail_on='"atlantis"."a" EXECUTE optimize')
-    c = cfg.load("maintain", {**BASE_ENV, "MAINTAIN_NAMESPACES": "atlantis,lks"})
+    conn = FakeConn(TABLES, fail_on='"sales"."a" EXECUTE optimize')
+    c = cfg.load("maintain", {**BASE_ENV, "MAINTAIN_NAMESPACES": "sales,crm"})
     assert maintain.maintain(conn, c) == 1
     altered = [s for s in conn.executed if s.startswith("ALTER")]
-    # a failed on its first statement; b and both lks tables got all three.
+    # a failed on its first statement; b and both crm tables got all three.
     assert len(altered) == 1 + 3 * 3
 
 

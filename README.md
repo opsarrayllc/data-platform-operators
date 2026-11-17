@@ -198,7 +198,7 @@ default, so tables are `lakekeeper.<namespace>.<table>`. Set
 ```yaml
 spec:
   trino:
-    catalog: keyme
+    catalog: acme
 ```
 
 Renaming it changes every fully qualified table name: saved queries, BI

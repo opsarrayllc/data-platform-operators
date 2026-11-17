@@ -53,13 +53,13 @@ func (f *fakeLakekeeper) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	const nsPath = "/catalog/v1/wh-1/namespaces"
 	switch {
 	case r.Method == http.MethodGet && r.URL.Path == "/catalog/v1/config":
-		if r.URL.Query().Get("warehouse") != "keyme" {
+		if r.URL.Query().Get("warehouse") != "acme" {
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
 		_, _ = w.Write([]byte(`{"overrides":{"prefix":"wh-1"},"defaults":{}}`))
 	case r.Method == http.MethodGet && r.URL.Path == "/management/v1/warehouse":
-		_, _ = w.Write([]byte(`{"warehouses":[{"id":"wh-1","name":"keyme"}]}`))
+		_, _ = w.Write([]byte(`{"warehouses":[{"id":"wh-1","name":"acme"}]}`))
 	case r.Method == http.MethodPost && r.URL.Path == "/management/v1/permissions/warehouse/wh-1/assignments":
 		f.warehouseGrants = append(f.warehouseGrants, payload)
 		w.WriteHeader(http.StatusNoContent)
@@ -115,7 +115,7 @@ func TestEnsureNamespaceOwners(t *testing.T) {
 		t.Fatalf("owners = %v", owners)
 	}
 	for range 2 { // idempotent
-		if err := c.EnsureNamespaceOwners(context.Background(), "lakekeeper", "lakekeeper", 8181, "op-token", "keyme", owners); err != nil {
+		if err := c.EnsureNamespaceOwners(context.Background(), "lakekeeper", "lakekeeper", 8181, "op-token", "acme", owners); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -265,8 +265,8 @@ spec:
                           type: string
                         sources:
                           description: |-
-                            sources are Iceberg namespaces ("atlantis") or tables
-                            ("atlantis.atlantis_public_orders") in the Trino catalog to watch.
+                            sources are Iceberg namespaces ("sales") or tables
+                            ("sales.orders") in the Trino catalog to watch.
                           items:
                             pattern: ^[a-z0-9_]+(\.[a-z0-9_]+)*$
                             type: string

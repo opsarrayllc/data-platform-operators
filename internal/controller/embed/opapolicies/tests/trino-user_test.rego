@@ -12,7 +12,7 @@ test_oidc_user_maps_to_oidc_principal if {
 }
 
 test_service_account_maps_to_kubernetes_principal if {
-	trino.lakekeeper_user_id == "kubernetes~system:serviceaccount:argo-workflows:transform-keyme" with input as {"context": {"identity": {"user": "system:serviceaccount:argo-workflows:transform-keyme"}}}
+	trino.lakekeeper_user_id == "kubernetes~system:serviceaccount:argo-workflows:transform-acme" with input as {"context": {"identity": {"user": "system:serviceaccount:argo-workflows:transform-acme"}}}
 }
 
 test_prefix_must_be_at_start if {

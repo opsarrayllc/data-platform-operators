@@ -39,7 +39,7 @@ var _ = Describe("Transformation Controller", func() {
 	const (
 		orchName   = "transforms"
 		workflowNS = "transforms-argo"
-		name       = "keyme"
+		name       = "acme"
 	)
 	ctx := context.Background()
 	key := types.NamespacedName{Name: name}
@@ -114,7 +114,7 @@ var _ = Describe("Transformation Controller", func() {
 					{
 						Name:     "live",
 						Select:   "tag:live",
-						OnChange: &orchestrationv1alpha1.OnChangeSpec{Sources: []string{"lks", "atlantis"}},
+						OnChange: &orchestrationv1alpha1.OnChangeSpec{Sources: []string{"sales", "crm"}},
 					},
 					{
 						Name:     "daily",
@@ -125,7 +125,7 @@ var _ = Describe("Transformation Controller", func() {
 					},
 				},
 				Maintenance: &orchestrationv1alpha1.MaintenanceSpec{
-					Namespaces: []string{"luigi_transformations_rebuilt"},
+					Namespaces: []string{"analytics"},
 				},
 			},
 		})).To(Succeed())
@@ -164,25 +164,25 @@ var _ = Describe("Transformation Controller", func() {
 		reconcileOnce()
 
 		By("creating the runner identity")
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-keyme", Namespace: workflowNS}, &corev1.ServiceAccount{})).To(Succeed())
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-keyme-state", Namespace: workflowNS}, &corev1.ConfigMap{})).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-acme", Namespace: workflowNS}, &corev1.ServiceAccount{})).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-acme-state", Namespace: workflowNS}, &corev1.ConfigMap{})).To(Succeed())
 		role := &rbacv1.Role{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-keyme", Namespace: workflowNS}, role)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-acme", Namespace: workflowNS}, role)).To(Succeed())
 		Expect(role.Rules).To(ContainElement(rbacv1.PolicyRule{
 			APIGroups: []string{""}, Resources: []string{"configmaps"},
-			ResourceNames: []string{"transform-keyme-state"}, Verbs: []string{"get", "update", "patch"},
+			ResourceNames: []string{"transform-acme-state"}, Verbs: []string{"get", "update", "patch"},
 		}))
 		binding := &rbacv1.RoleBinding{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-keyme", Namespace: workflowNS}, binding)).To(Succeed())
-		Expect(binding.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "ServiceAccount", Name: "transform-keyme", Namespace: workflowNS}))
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-acme", Namespace: workflowNS}, binding)).To(Succeed())
+		Expect(binding.Subjects).To(ConsistOf(rbacv1.Subject{Kind: "ServiceAccount", Name: "transform-acme", Namespace: workflowNS}))
 
 		By("copying Trino's CA")
 		ca := &corev1.ConfigMap{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-keyme-trino-ca", Namespace: workflowNS}, ca)).To(Succeed())
+		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "transform-acme-trino-ca", Namespace: workflowNS}, ca)).To(Succeed())
 		Expect(ca.Data["ca.crt"]).To(ContainSubstring("BEGIN CERTIFICATE"))
 
 		By("rendering the onChange lane")
-		live, err := getCronWorkflow("keyme-live")
+		live, err := getCronWorkflow("acme-live")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(live.GetLabels()).To(HaveKeyWithValue(labelLane, "live"))
 		schedules, _, _ := unstructured.NestedStringSlice(live.Object, "spec", "schedules")
@@ -190,13 +190,13 @@ var _ = Describe("Transformation Controller", func() {
 		policy, _, _ := unstructured.NestedString(live.Object, "spec", "concurrencyPolicy")
 		Expect(policy).To(Equal("Forbid"))
 		sa, _, _ := unstructured.NestedString(live.Object, "spec", "workflowSpec", "serviceAccountName")
-		Expect(sa).To(Equal("transform-keyme"))
+		Expect(sa).To(Equal("transform-acme"))
 
 		container := runnerContainerOf(live)
 		Expect(container.Image).To(Equal(orchestrationv1alpha1.DefaultTransformationImage))
 		Expect(container.Args).To(Equal([]string{"on-change"}))
 		env := envMap(container.Env)
-		Expect(env).To(HaveKeyWithValue("WATCH_SOURCES", "atlantis,lks"))
+		Expect(env).To(HaveKeyWithValue("WATCH_SOURCES", "crm,sales"))
 		Expect(env).To(HaveKeyWithValue("DBT_COMMAND", "run"))
 		Expect(env).To(HaveKeyWithValue("DBT_SELECT", "tag:live"))
 		Expect(env).To(HaveKeyWithValue("DBT_TARGET", "prod"))
@@ -205,7 +205,7 @@ var _ = Describe("Transformation Controller", func() {
 		Expect(env).To(HaveKeyWithValue("PROJECT_PATH", "project"))
 		Expect(env).To(HaveKeyWithValue("TRINO_HOST", "trino.trino.svc"))
 		Expect(env).To(HaveKeyWithValue("TRINO_PORT", "8443"))
-		Expect(env).To(HaveKeyWithValue("TRANSFORM_STATE_CONFIGMAP", "transform-keyme-state"))
+		Expect(env).To(HaveKeyWithValue("TRANSFORM_STATE_CONFIGMAP", "transform-acme-state"))
 		var token *corev1.EnvVar
 		for i := range container.Env {
 			if container.Env[i].Name == "PROJECT_GIT_TOKEN" {
@@ -226,7 +226,7 @@ var _ = Describe("Transformation Controller", func() {
 		Expect(audience).To(Equal("lakekeeper"))
 
 		By("rendering the scheduled lane")
-		daily, err := getCronWorkflow("keyme-daily")
+		daily, err := getCronWorkflow("acme-daily")
 		Expect(err).NotTo(HaveOccurred())
 		schedules, _, _ = unstructured.NestedStringSlice(daily.Object, "spec", "schedules")
 		Expect(schedules).To(Equal([]string{"30 6 * * *"}))
@@ -238,11 +238,11 @@ var _ = Describe("Transformation Controller", func() {
 		Expect(envMap(dailyContainer.Env)).NotTo(HaveKey("WATCH_SOURCES"))
 
 		By("rendering maintenance")
-		maint, err := getCronWorkflow("keyme-maintenance")
+		maint, err := getCronWorkflow("acme-maintenance")
 		Expect(err).NotTo(HaveOccurred())
 		maintEnv := envMap(runnerContainerOf(maint).Env)
 		Expect(runnerContainerOf(maint).Args).To(Equal([]string{"maintain"}))
-		Expect(maintEnv).To(HaveKeyWithValue("MAINTAIN_NAMESPACES", "luigi_transformations_rebuilt"))
+		Expect(maintEnv).To(HaveKeyWithValue("MAINTAIN_NAMESPACES", "analytics"))
 		Expect(maintEnv).To(HaveKeyWithValue("MAINTAIN_FILE_SIZE_THRESHOLD", "128MB"))
 		Expect(maintEnv).To(HaveKeyWithValue("MAINTAIN_SNAPSHOT_RETENTION", "7d"))
 
@@ -250,18 +250,18 @@ var _ = Describe("Transformation Controller", func() {
 		t := &orchestrationv1alpha1.Transformation{}
 		Expect(k8sClient.Get(ctx, key, t)).To(Succeed())
 		Expect(t.Status.Namespace).To(Equal(workflowNS))
-		Expect(t.Status.ServiceAccount).To(Equal("system:serviceaccount:" + workflowNS + ":transform-keyme"))
+		Expect(t.Status.ServiceAccount).To(Equal("system:serviceaccount:" + workflowNS + ":transform-acme"))
 		Expect(meta.IsStatusConditionTrue(t.Status.Conditions, orchestrationv1alpha1.ConditionTransformationReady)).To(BeTrue())
 		Expect(t.Status.Lanes).To(HaveLen(3))
-		Expect(t.Status.Lanes[0].CronWorkflow).To(Equal("keyme-live"))
+		Expect(t.Status.Lanes[0].CronWorkflow).To(Equal("acme-live"))
 	})
 
 	It("leaves an unchanged CronWorkflow alone", func() {
 		reconcileOnce()
-		before, err := getCronWorkflow("keyme-live")
+		before, err := getCronWorkflow("acme-live")
 		Expect(err).NotTo(HaveOccurred())
 		reconcileOnce()
-		after, err := getCronWorkflow("keyme-live")
+		after, err := getCronWorkflow("acme-live")
 		Expect(err).NotTo(HaveOccurred())
 		Expect(after.GetResourceVersion()).To(Equal(before.GetResourceVersion()))
 	})
@@ -277,13 +277,13 @@ var _ = Describe("Transformation Controller", func() {
 		Expect(k8sClient.Update(ctx, t)).To(Succeed())
 		reconcileOnce()
 
-		live, err := getCronWorkflow("keyme-live")
+		live, err := getCronWorkflow("acme-live")
 		Expect(err).NotTo(HaveOccurred())
 		suspended, _, _ := unstructured.NestedBool(live.Object, "spec", "suspend")
 		Expect(suspended).To(BeTrue())
-		_, err = getCronWorkflow("keyme-daily")
+		_, err = getCronWorkflow("acme-daily")
 		Expect(errors.IsNotFound(err)).To(BeTrue())
-		_, err = getCronWorkflow("keyme-maintenance")
+		_, err = getCronWorkflow("acme-maintenance")
 		Expect(errors.IsNotFound(err)).To(BeTrue())
 	})
 

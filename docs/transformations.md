@@ -10,7 +10,7 @@ The runner image is `ghcr.io/opsarrayllc/data-platform-dbt-runner`, built from [
 apiVersion: dataplatform.opsarray.io/v1alpha1
 kind: Transformation
 metadata:
-  name: keyme
+  name: acme
 spec:
   orchestrationRef: local          # defaults to the only Orchestration
   project:
@@ -25,7 +25,7 @@ spec:
     - name: live                   # runs soon after replication writes
       select: tag:live
       onChange:
-        sources: [atlantis, lks]   # Iceberg namespaces or ns.table
+        sources: [sales, crm]       # Iceberg namespaces or ns.table
     - name: hourly
       select: tag:hourly
       schedule: "5 * * * *"
@@ -35,7 +35,7 @@ spec:
       schedule: "30 6 * * *"
       timezone: America/New_York
   maintenance:
-    namespaces: [luigi_transformations_rebuilt, luigi_transformations_staging]
+    namespaces: [analytics, analytics_staging]
 ```
 
 ## What the operator creates
@@ -72,8 +72,8 @@ spec:
     serviceAccountTokens:
       grants:
         - namespace: argo            # status.namespace
-          name: transform-keyme      # transform-<name>
-          icebergNamespaces: [luigi_transformations_rebuilt, luigi_transformations_staging]
+          name: transform-acme       # transform-<name>
+          icebergNamespaces: [analytics, analytics_staging]
 ```
 
 **Reading:** the account also needs read access to its source namespaces. The DataLake can't grant read-only access yet.
