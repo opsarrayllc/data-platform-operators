@@ -253,7 +253,7 @@ def test_split_sources():
 def test_resolve(caplog):
     conn = FakeConn(TABLES)
     got = watch.resolve(conn, "lakekeeper", ["sales", "crm.customers", "crm.missing", "empty"])
-    assert got == [("sales", "a"), ("sales", "b"), ("crm", "customers")]
+    assert got == [("crm", "customers"), ("sales", "a"), ("sales", "b")]
     assert "crm.missing" in caplog.text and "empty" in caplog.text
 
 

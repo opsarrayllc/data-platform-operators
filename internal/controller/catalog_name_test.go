@@ -15,7 +15,7 @@ func TestTrinoCatalogName(t *testing.T) {
 	dp.Spec.Trino.Catalog = "acme"
 	dp.Spec.Lakekeeper.Warehouse.Name = "acme"
 	dp.Spec.Trino.ExtraCatalogs = map[string]string{
-		"acme":      "connector.name=memory\n",
+		"acme":       "connector.name=memory\n",
 		"lakekeeper": "connector.name=memory\n",
 	}
 	r := &DataLakeReconciler{}

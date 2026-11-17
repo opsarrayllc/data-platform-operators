@@ -114,7 +114,7 @@ var _ = Describe("Transformation Controller", func() {
 					{
 						Name:     "live",
 						Select:   "tag:live",
-						OnChange: &orchestrationv1alpha1.OnChangeSpec{Sources: []string{"crm", "sales"}},
+						OnChange: &orchestrationv1alpha1.OnChangeSpec{Sources: []string{"sales", "crm"}},
 					},
 					{
 						Name:     "daily",
@@ -196,7 +196,7 @@ var _ = Describe("Transformation Controller", func() {
 		Expect(container.Image).To(Equal(orchestrationv1alpha1.DefaultTransformationImage))
 		Expect(container.Args).To(Equal([]string{"on-change"}))
 		env := envMap(container.Env)
-		Expect(env).To(HaveKeyWithValue("WATCH_SOURCES", "sales,crm"))
+		Expect(env).To(HaveKeyWithValue("WATCH_SOURCES", "crm,sales"))
 		Expect(env).To(HaveKeyWithValue("DBT_COMMAND", "run"))
 		Expect(env).To(HaveKeyWithValue("DBT_SELECT", "tag:live"))
 		Expect(env).To(HaveKeyWithValue("DBT_TARGET", "prod"))

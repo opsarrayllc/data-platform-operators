@@ -25,7 +25,7 @@ spec:
     - name: live                   # runs soon after replication writes
       select: tag:live
       onChange:
-        sources: [sales, crm]   # Iceberg namespaces or ns.table
+        sources: [sales, crm]       # Iceberg namespaces or ns.table
     - name: hourly
       select: tag:hourly
       schedule: "5 * * * *"
@@ -72,7 +72,7 @@ spec:
     serviceAccountTokens:
       grants:
         - namespace: argo            # status.namespace
-          name: transform-acme      # transform-<name>
+          name: transform-acme       # transform-<name>
           icebergNamespaces: [analytics, analytics_staging]
 ```
 
