@@ -65,6 +65,9 @@ type oidcConfig struct {
 	// serviceAccounts replaces the machine OIDC clients with Kubernetes
 	// ServiceAccount tokens (spec.auth.serviceAccountTokens).
 	serviceAccounts serviceAccountTokens
+	// trinoJWT, when set, lets the Trino coordinator accept ServiceAccount
+	// tokens from this issuer. reconcileTrino fills it in.
+	trinoJWT *trinoJWTConfig
 
 	tokenURL       string
 	proxyNamespace string

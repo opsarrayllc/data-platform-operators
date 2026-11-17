@@ -184,10 +184,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	saIssuer, err := controller.NewServiceAccountIssuer(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "Failed to create ServiceAccount issuer client")
+		os.Exit(1)
+	}
+
 	if err := (&controller.DataLakeReconciler{
-		Client:  mgr.GetClient(),
-		Scheme:  mgr.GetScheme(),
-		Catalog: catalog,
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		Catalog:              catalog,
+		ServiceAccountIssuer: saIssuer,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "Failed to create controller", "controller", "datalake")
 		os.Exit(1)

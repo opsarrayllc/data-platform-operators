@@ -102,7 +102,7 @@ test-rego: opa ## Run the OPA policy tests.
 # The operator flattens both policy directories into one ConfigMap, so the
 # policies must be checked as one bundle rather than per directory.
 	@rm -rf "$(REGO_BUILD)" && mkdir -p "$(REGO_BUILD)"
-	@cp $(REGO_DIRS:%=%/*.rego) internal/controller/embed/rowfilters/tests/*.rego "$(REGO_BUILD)/"
+	@cp $(REGO_DIRS:%=%/*.rego) internal/controller/embed/rowfilters/tests/*.rego internal/controller/embed/opapolicies/tests/*.rego "$(REGO_BUILD)/"
 	"$(OPA)" check --strict "$(REGO_BUILD)"
 	"$(OPA)" test "$(REGO_BUILD)"
 

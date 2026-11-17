@@ -53,6 +53,13 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 		}
 	}
 
+	jwt, err := r.reconcileTrinoJWT(ctx, dp, ns, oidc)
+	if err != nil {
+		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
+		return err
+	}
+	oidc.trinoJWT = jwt
+
 	sharedSecret, err := r.trinoSharedSecret(ctx, dp, ns, oidc)
 	if err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
@@ -92,7 +99,7 @@ func (r *DataLakeReconciler) reconcileTrino(ctx context.Context, dp *dataplatfor
 			return err
 		}
 	}
-	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != "", tls, oidc.serviceAccounts); err != nil {
+	if err := r.applyTrinoCoordinator(ctx, dp, ns, cfgHash, trinoUIAuthEnabled(oidc, dp.Spec.Trino.PublicURL), opaURL != "", tls, jwt != nil, oidc.serviceAccounts); err != nil {
 		setCondition(dp, dataplatformv1alpha1.ConditionTrinoReady, metav1.ConditionFalse, reasonError, err.Error())
 		return err
 	}
@@ -133,6 +140,9 @@ func trinoConfigProperties(coordinator, includeCoordinator bool, ns string, extr
 	oauthUI := trinoUIAuthEnabled(oidc, publicURL)
 	if coordinator && oauthSQL {
 		maps.Copy(props, trinoOAuthProperties(oidc, oauthUI))
+		if oidc.trinoJWT != nil {
+			maps.Copy(props, trinoJWTProperties(*oidc.trinoJWT))
+		}
 		// Trino authenticates clients only over HTTPS (or HTTP that a
 		// TLS-terminating proxy marks with X-Forwarded-Proto: https).
 		props["http-server.https.enabled"] = strconv.FormatBool(true)
@@ -197,7 +207,7 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 		issuer = oidc.publicIssuer
 	}
 	props := map[string]string{
-		"http-server.authentication.type": authTypeOAuth2,
+		propTrinoAuthType: authTypeOAuth2,
 		// Plain HTTP would otherwise fall back to the insecure authenticator,
 		// which takes the user name from X-Trino-User without checking it.
 		// Worker traffic is internal and authenticated with the shared secret.
@@ -206,7 +216,7 @@ func trinoOAuthProperties(oidc oidcConfig, enableWebUI bool) map[string]string {
 		"http-server.authentication.oauth2.client-id":            oidc.trinoClientID,
 		"http-server.authentication.oauth2.client-secret":        oidc.trinoSecret,
 		"http-server.authentication.oauth2.scopes":               "openid",
-		"http-server.authentication.oauth2.principal-field":      "sub",
+		"http-server.authentication.oauth2.principal-field":      claimSubject,
 		"http-server.authentication.oauth2.additional-audiences": oidc.audience,
 	}
 	if enableWebUI {
@@ -393,7 +403,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 	ctx context.Context,
 	dp *dataplatformv1alpha1.DataLake,
 	ns, cfgHash string,
-	oauth, opa, tls bool,
+	oauth, opa, tls, jwtKeys bool,
 	sa serviceAccountTokens,
 ) error {
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: nameTrino, Namespace: ns}}
@@ -417,6 +427,7 @@ func (r *DataLakeReconciler) applyTrinoCoordinator(
 			oauth,
 			opa,
 			tls,
+			jwtKeys,
 			sa,
 		)
 		return nil
@@ -464,6 +475,7 @@ func (r *DataLakeReconciler) reconcileTrinoWorkers(
 			false,
 			false,
 			false,
+			false,
 			sa,
 		)
 		return nil
@@ -476,7 +488,7 @@ func trinoPodSpec(
 	image, configKey string,
 	resources corev1.ResourceRequirements,
 	env []corev1.EnvVar,
-	oauth, opa, tls bool,
+	oauth, opa, tls, jwtKeys bool,
 	sa serviceAccountTokens,
 ) corev1.PodSpec {
 	probe := corev1.ProbeHandler{
@@ -524,6 +536,17 @@ func trinoPodSpec(
 			VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{
 				SecretName: secretTrinoTLS,
 				Items:      []corev1.KeyToPath{{Key: keyTrinoKeystore, Path: keyTrinoKeystore}},
+			}},
+		})
+	}
+	if jwtKeys {
+		// Mounted as a directory, not with subPath, so rotated keys reach the
+		// running coordinator.
+		mounts = append(mounts, corev1.VolumeMount{Name: volumeTrinoJWTKeys, MountPath: trinoJWTKeysDir, ReadOnly: true})
+		volumes = append(volumes, corev1.Volume{
+			Name: volumeTrinoJWTKeys,
+			VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: configMapTrinoJWTKeys},
 			}},
 		})
 	}
