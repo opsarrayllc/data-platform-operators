@@ -1,0 +1,39 @@
+# A dbt project run on Trino by Argo Workflows. Apply after the local
+# Orchestration is ready. See docs/transformations.md.
+#
+# The runner signs in to Trino as system:serviceaccount:argo:transform-sample.
+# Give it the namespaces it writes in the DataLake:
+#
+#   spec:
+#     auth:
+#       serviceAccountTokens:
+#         grants:
+#           - namespace: argo
+#             name: transform-sample
+#             icebergNamespaces: [analytics]
+apiVersion: dataplatform.opsarray.io/v1alpha1
+kind: Transformation
+metadata:
+  name: sample
+spec:
+  orchestrationRef: local
+  project:
+    git:
+      # Placeholder: point this at your dbt project.
+      url: https://github.com/opsarrayllc/dbt-sample.git
+      ref: main
+  lanes:
+    # Near-live: checks every minute and runs only when a watched table has a
+    # new snapshot.
+    - name: live
+      select: tag:live
+      onChange:
+        sources: [sales]
+    # Heavy models once a day, with tests.
+    - name: daily
+      command: build
+      select: tag:daily
+      schedule: "30 6 * * *"
+      timezone: America/New_York
+  maintenance:
+    namespaces: [analytics]

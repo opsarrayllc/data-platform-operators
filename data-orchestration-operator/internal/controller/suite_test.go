@@ -61,7 +61,8 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 
 	testEnv = &envtest.Environment{
-		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases")},
+		// The Argo CRDs let Transformation specs create CronWorkflows.
+		CRDDirectoryPaths:     []string{filepath.Join("..", "..", "config", "crd", "bases"), filepath.Join("embed", "crds.yaml")},
 		ErrorIfCRDPathMissing: true,
 	}
 	if dir := getFirstFoundEnvTestBinaryDir(); dir != "" {
