@@ -46,6 +46,11 @@ jobs:
           - image: data-platform-ga4-loader
             context: images/ga4-loader
             qemu: true
+          # dbt on Trino for Transformations (data-orchestration-operator).
+          # The operator's default runner image pins the release tag.
+          - image: data-platform-dbt-runner
+            context: images/dbt-runner
+            qemu: true
     env:
       IMAGE: ${{ github.repository_owner }}/${{ matrix.image }}
     permissions:

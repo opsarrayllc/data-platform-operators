@@ -2,7 +2,7 @@
 
 A `Transformation` (data-orchestration-operator) runs a dbt project on Trino through Argo Workflows. It splits the project into **lanes**, each running its own dbt selection on its own schedule. A fast lane can follow replication closely, while heavy models run less often.
 
-**Status:** the operator side is done. The runner image (`ghcr.io/opsarrayllc/data-platform-dbt-runner`) is not built yet; its contract is below.
+The runner image is `ghcr.io/opsarrayllc/data-platform-dbt-runner`, built from [`images/dbt-runner`](../images/dbt-runner/README.md).
 
 ## Example
 
@@ -100,14 +100,16 @@ The container gets one argument, its mode, and these environment variables:
 | `MAINTAIN_SNAPSHOT_RETENTION` | `maintain` | Default `7d` |
 | `HOME` | all | `/work`, a writable emptyDir. `/tmp` is writable too; the root filesystem is read-only. |
 
-`spec.env` is appended after these, so it can override them.
+`spec.env` is appended after these, so it can override them. It can also set the runner's optional variables (`DBT_SCHEMA`, `DBT_THREADS`, `DBT_PROFILES_DIR`, `PROJECT_GIT_USERNAME`, `LOG_LEVEL`); see the [runner README](../images/dbt-runner/README.md).
 
 **Modes:**
-- **`run`:** clone the project, then `dbt <command> --select … [--exclude …] [--full-refresh] --target … --vars …`.
+- **`run`:** clone the project, run `dbt deps` if it has packages, then `dbt <command> --select … [--exclude …] [--full-refresh] --target … --vars …`.
 - **`on-change`:**
-  1. For each watched table, read its newest snapshot via `"<table>$snapshots"`. A namespace means every table in it.
-  2. Compare with the state ConfigMap. If nothing changed, exit 0 without running dbt.
+  1. For each watched table, read its newest snapshot via `"<table>$snapshots"`, ignoring `replace` snapshots from compaction. A namespace means every table in it.
+  2. Compare with `<lane>.json` in the state ConfigMap. If nothing changed, exit 0 without running dbt.
   3. Otherwise run as in `run` mode. Record the snapshots only after dbt succeeds, so a failed run is retried on the next tick.
+
+  Don't watch a table the lane itself writes, or the lane runs on every tick.
 - **`maintain`:** for every table in each namespace, run `ALTER TABLE … EXECUTE optimize(file_size_threshold => …)`, `expire_snapshots(retention_threshold => …)` and `remove_orphan_files(retention_threshold => …)`.
 
 The runner runs as uid 65532.
