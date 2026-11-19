@@ -9,6 +9,9 @@
 # OPA policies compiled into the manager via //go:embed
 !**/*.rego
 
+# Debezium offset expiry program compiled into the manager via //go:embed
+!internal/controller/embed/debezium/*.java
+
 # Re-include Go module files
 !go.mod
 !go.sum
