@@ -27,6 +27,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/utils/ptr"
@@ -74,6 +75,21 @@ const (
 	debeziumHeartbeatIntervalMS = "60000"
 	// propDebeziumUpsert is generated, and commonly overridden per source.
 	propDebeziumUpsert = "debezium.sink.iceberg.upsert"
+	// The offset store adds a snapshot to its table on every offset commit
+	// and never expires them. Metadata grows with each one, and once a
+	// commit outlasts offset.flush.timeout.ms the engine stops confirming
+	// the replication slot, so a sidecar expires them on a timer. The table
+	// only ever needs its latest snapshot; the rest is kept for debugging.
+	configMapDebeziumMaintenance = "debezium-maintenance"
+	keyOffsetExpirySource        = "ExpireOffsetSnapshots.java"
+	volumeDebeziumMaintenance    = "maintenance"
+	debeziumMaintenanceDir       = "/debezium/maintenance"
+	containerOffsetExpiry        = "offset-expiry"
+	offsetExpiryRetainMS         = int64(3600 * 1000)
+	offsetExpiryRetainLast       = 10
+	// offsetExpiryDelaySeconds lets the token proxy and engine start first.
+	offsetExpiryDelaySeconds    = 120
+	offsetExpiryIntervalSeconds = 1800
 	// authTypeOAuth2 is the OAuth2 authentication type in Trino and Iceberg.
 	authTypeOAuth2 = "oauth2"
 )
@@ -165,6 +181,9 @@ func (r *DataLakeReconciler) reconcileDebezium(
 			return fail(err)
 		}
 	}
+	if err := r.applyDebeziumMaintenanceConfigMap(ctx, dp, ns); err != nil {
+		return fail(err)
+	}
 
 	keep := map[string]bool{}
 	var notReady []string
@@ -243,7 +262,8 @@ func (r *DataLakeReconciler) reconcileDebeziumSource(
 	}
 
 	// Credentials are hashed too: env vars from a Secret only change on restart.
-	cfgHash := hashData(props, user, password)
+	// The expiry program is hashed so pods pick up a new version.
+	cfgHash := hashData(props, user, password, debeziumOffsetExpirySource)
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: debeziumName(src), Namespace: ns}}
 	return r.apply(ctx, dp, deploy, func() error {
 		ensureLabels(deploy, labels)
@@ -323,17 +343,73 @@ func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec,
 			},
 			Resources:       src.Resources,
 			SecurityContext: restrictedContainerSecurity(uidDebezium, gidDebezium),
-		}},
+		}, offsetExpiryContainer(image)},
 		Volumes: []corev1.Volume{
 			{Name: volumeConfig, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: debeziumConfigSecretName(src)}}},
 			{Name: volumeData, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: volumeTmp, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+			{Name: volumeDebeziumMaintenance, VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+				LocalObjectReference: corev1.LocalObjectReference{Name: configMapDebeziumMaintenance},
+				DefaultMode:          ptr.To(int32(0o444)),
+			}}},
 		},
 	}
 	if sa.enabled {
 		withTokenProxy(&spec, sa)
 	}
 	return spec
+}
+
+// applyDebeziumMaintenanceConfigMap publishes the offset expiry program that
+// every Debezium pod mounts.
+func (r *DataLakeReconciler) applyDebeziumMaintenanceConfigMap(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapDebeziumMaintenance, Namespace: ns}}
+	return r.apply(ctx, dp, cm, func() error {
+		ensureLabels(cm, labelsFor(dp, componentDebezium))
+		cm.Data = map[string]string{keyOffsetExpirySource: debeziumOffsetExpirySource}
+		return nil
+	})
+}
+
+// offsetExpiryContainer expires the offset table's snapshots on a timer. It
+// runs in the Debezium Server image, so it uses the engine's Iceberg libraries,
+// configuration, and credentials (including the token proxy) as they are.
+// A failed run is logged and retried on the next tick; it never stops the
+// engine.
+func offsetExpiryContainer(image string) corev1.Container {
+	run := fmt.Sprintf(
+		`java -XX:-UsePerfData -XX:MaxRAMPercentage=70 -cp '/debezium/lib/*' %s/%s %s/%s %d %d || echo "Offset snapshot expiry failed"`,
+		debeziumMaintenanceDir, keyOffsetExpirySource, debeziumConfigDir, keyDebeziumConfig,
+		offsetExpiryRetainMS, offsetExpiryRetainLast)
+	// The trap and backgrounded sleep let the pod stop without waiting out
+	// its termination grace period.
+	script := fmt.Sprintf(`trap 'exit 0' TERM INT
+sleep %d & wait $!
+while true; do
+  %s
+  sleep %d & wait $!
+done`, offsetExpiryDelaySeconds, run, offsetExpiryIntervalSeconds)
+	return corev1.Container{
+		Name:    containerOffsetExpiry,
+		Image:   image,
+		Command: []string{"/bin/sh", "-c", script},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: volumeConfig, MountPath: debeziumConfigDir, ReadOnly: true},
+			{Name: volumeDebeziumMaintenance, MountPath: debeziumMaintenanceDir, ReadOnly: true},
+			{Name: volumeTmp, MountPath: "/tmp"},
+		},
+		// Idle between runs. The limit covers a JVM reading table metadata
+		// with tens of thousands of snapshots, as on the first run against a
+		// table that was never expired.
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("10m"),
+				corev1.ResourceMemory: resource.MustParse("64Mi"),
+			},
+			Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("768Mi")},
+		},
+		SecurityContext: restrictedContainerSecurity(uidDebezium, gidDebezium),
+	}
 }
 
 // debeziumProperties renders Debezium Server's application.properties. Every

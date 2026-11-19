@@ -29,6 +29,7 @@ All of the following go in `spec.debezium.namespace`, which defaults to `debeziu
 - **`debezium-<name>`.** A single-replica Deployment with the `Recreate` strategy, so two engines never read one source at the same time.
 - **`debezium-<name>-config`.** A Secret holding `application.properties`. Use `extraProperties` to override any generated key.
 - **`debezium-<name>-credentials`.** A copy of the source login. The pod reads it into environment variables, and the properties file only refers to them.
+- **The `debezium-maintenance` ConfigMap.** The offset expiry program that every pod mounts (see [Offset table snapshots](#offset-table-snapshots)).
 
 The `DebeziumReady` condition reports progress. Debezium waits until `WarehouseReady` is true.
 
@@ -52,6 +53,32 @@ Once the first source exists, the principal gets `project_admin` on the default 
 - **Upsert.** By default (`upsert: true`) a table keeps one row per primary key. A deleted row stays, with `__deleted = true`. Tables without a primary key are append-only.
 - **Metadata columns.** Every row has `__op`, `__table`, `__source_ts_ns`, `__db` and `__ts_ms`.
 - **Offsets and schema history.** Debezium keeps these in `_debezium_offset_storage_<prefix>` and `_debezium_schema_history_<prefix>` in the same namespace, so the pods hold no state. Deleting those tables makes the source snapshot again.
+
+## Offset table snapshots
+
+Debezium saves its position by overwriting the offset table, which adds an
+Iceberg snapshot on every save (at least once a minute with heartbeats).
+Nothing expires them, and every commit gets slower as the table metadata grows.
+When a save takes longer than `offset.flush.timeout.ms` (5 seconds by
+default), the engine skips confirming the position to the source. On
+PostgreSQL the replication slot then stops advancing, even though the stored
+offset keeps moving. WAL builds up until `max_slot_wal_keep_size` invalidates
+the slot, and the source has to be snapshotted again.
+
+So each pod runs an `offset-expiry` container next to the engine. It uses the
+engine's image, configuration, and LakeKeeper identity. Two minutes after
+start, and then every 30 minutes, it expires offset table snapshots older than
+an hour, keeping at least the last 10, and deletes the files only they used.
+A failed run is logged and retried on the next tick; it never stops the
+engine.
+
+- **Logs.** `kubectl logs -n debezium deploy/debezium-<name> -c offset-expiry`
+  prints one line per run: `Expired N snapshot(s) of <table> in <ms> ms; M remain`.
+- **First run.** On a table that was never expired, the first run reads every
+  snapshot's manifest list and can take several minutes.
+- **Other tables.** Destination tables and the schema history table aren't
+  expired. Destination snapshots are what time travel and downstream
+  change detection read, so their retention is a separate decision.
 
 ## Object storage
 
@@ -94,7 +121,7 @@ MariaDB uses the same settings, with `connector: mariadb`.
   ```
 
 - The operator names the slot and publication `debezium_<prefix>`, uses `pgoutput`, and creates the publication with `publication.autocreate.mode=filtered`. That mode needs table ownership, not superuser.
-- Watch the slot's retained WAL (`pg_replication_slots`). A stopped or removed source keeps its slot, and WAL builds up until you drop the slot.
+- Watch the slot's retained WAL (`pg_replication_slots`). A stopped or removed source keeps its slot, and WAL builds up until you drop the slot. Also watch `Flush of the offsets failed` in the engine's logs: while saves time out, the slot isn't confirmed (see [Offset table snapshots](#offset-table-snapshots)).
 
 ### SQL Server
 

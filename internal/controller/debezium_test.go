@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
 
 	dataplatformv1alpha1 "github.com/opsarrayllc/data-platform-operator/api/v1alpha1"
@@ -150,5 +151,61 @@ func TestDebeziumPropertiesVendedCredentials(t *testing.T) {
 		if _, ok := props[k]; ok {
 			t.Errorf("unexpected %s", k)
 		}
+	}
+}
+
+// TestDebeziumPodSpecOffsetExpiry covers the sidecar that expires the offset
+// table's snapshots: it runs the mounted program with the engine's image and
+// configuration, and shares the token proxy with the engine.
+func TestDebeziumPodSpecOffsetExpiry(t *testing.T) {
+	src := &dataplatformv1alpha1.DebeziumSourceSpec{Name: "billing", Connector: dataplatformv1alpha1.DebeziumConnectorPostgreSQL, Host: "h", Database: "billing"}
+	spec := debeziumPodSpec("debezium:test", src, serviceAccountTokens{enabled: true})
+
+	var expiry *corev1.Container
+	names := map[string]bool{}
+	for i := range spec.Containers {
+		names[spec.Containers[i].Name] = true
+		if spec.Containers[i].Name == containerOffsetExpiry {
+			expiry = &spec.Containers[i]
+		}
+	}
+	if expiry == nil {
+		t.Fatalf("no %s container in %v", containerOffsetExpiry, names)
+	}
+	if !names[nameDebezium] || !names[volumeTokenProxy] {
+		t.Errorf("containers = %v, want the engine and token proxy too", names)
+	}
+	if expiry.Image != "debezium:test" {
+		t.Errorf("image = %q, want the engine's", expiry.Image)
+	}
+	script := strings.Join(expiry.Command, " ")
+	for _, want := range []string{
+		debeziumMaintenanceDir + "/" + keyOffsetExpirySource,
+		debeziumConfigDir + "/" + keyDebeziumConfig,
+		"3600000 10",
+		"trap 'exit 0' TERM",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("command missing %q:\n%s", want, script)
+		}
+	}
+	mounts := map[string]string{}
+	for _, m := range expiry.VolumeMounts {
+		mounts[m.Name] = m.MountPath
+	}
+	if mounts[volumeConfig] != debeziumConfigDir || mounts[volumeDebeziumMaintenance] != debeziumMaintenanceDir {
+		t.Errorf("mounts = %v", mounts)
+	}
+	found := false
+	for _, v := range spec.Volumes {
+		if v.Name == volumeDebeziumMaintenance && v.ConfigMap != nil && v.ConfigMap.Name == configMapDebeziumMaintenance {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no %s volume from ConfigMap %s", volumeDebeziumMaintenance, configMapDebeziumMaintenance)
+	}
+	if !strings.Contains(debeziumOffsetExpirySource, "public class ExpireOffsetSnapshots") {
+		t.Error("embedded expiry program is missing or renamed")
 	}
 }
