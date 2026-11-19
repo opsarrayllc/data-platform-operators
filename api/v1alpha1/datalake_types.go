@@ -53,10 +53,16 @@ const (
 	// DefaultDebeziumImage is Debezium Server with the community Iceberg sink
 	// (github.com/memiiso/debezium-server-iceberg). Its "latest" tag is a
 	// rolling build, so pin a release.
-	DefaultDebeziumImage   = "ghcr.io/memiiso/debezium-server-iceberg:1.2.1.Final"
-	DefaultLakekeeperImage = "quay.io/lakekeeper/catalog:v0.13.3"
-	DefaultTrinoImage      = "trinodb/trino:476"
-	DefaultPostgresImage   = "postgres:17"
+	DefaultDebeziumImage = "ghcr.io/memiiso/debezium-server-iceberg:1.2.1.Final"
+	// DefaultDebeziumCompactionImage runs Trino table maintenance. It is the
+	// Transformation runner image, which has a maintenance mode.
+	DefaultDebeziumCompactionImage = "ghcr.io/opsarrayllc/data-platform-dbt-runner:0.12.0"
+	// DefaultDebeziumCompactionSchedule compacts every six hours.
+	DefaultDebeziumCompactionSchedule = "0 */6 * * *"
+	DefaultDebeziumCompactionFileSize = "128MB"
+	DefaultLakekeeperImage            = "quay.io/lakekeeper/catalog:v0.13.3"
+	DefaultTrinoImage                 = "trinodb/trino:476"
+	DefaultPostgresImage              = "postgres:17"
 	// Upstream minio/minio and minio/mc images are no longer anonymously
 	// pullable (Docker Hub deleted the repos; quay.io returns 401). These are
 	// the pgsty community forks, which keep the same server and mc entrypoints.
@@ -190,6 +196,53 @@ type DebeziumSpec struct {
 	// +listType=map
 	// +listMapKey=name
 	Sources []DebeziumSourceSpec `json:"sources,omitempty"`
+
+	// maintenance keeps the tables the sources write quick to commit to and
+	// to read.
+	// +optional
+	Maintenance DebeziumMaintenanceSpec `json:"maintenance,omitempty"`
+}
+
+// DebeziumMaintenanceSpec is upkeep of the Iceberg tables Debezium writes.
+//
+// The sink commits to each table about once a minute, adding a snapshot and
+// a small data file each time. Table metadata grows with every snapshot, so
+// commits slow down, and reads slow down with every small file. Each source's
+// pod expires its tables' old snapshots, and a CronJob compacts their files.
+type DebeziumMaintenanceSpec struct {
+	// snapshotRetention is how long data table snapshots are kept, for time
+	// travel. Every day kept is about 1,400 snapshots per busy table.
+	// Defaults to 24h. The offset table always keeps one hour.
+	// +optional
+	SnapshotRetention *metav1.Duration `json:"snapshotRetention,omitempty"`
+
+	// compaction rewrites small data files into larger ones through Trino.
+	// +optional
+	Compaction DebeziumCompactionSpec `json:"compaction,omitempty"`
+}
+
+// DebeziumCompactionSpec runs Trino's optimize on every table in the sources'
+// namespaces. The CronJob runs as the "debezium" ServiceAccount and signs in
+// to Trino with its token, so it needs Trino and auth.serviceAccountTokens;
+// without them it is not created.
+type DebeziumCompactionSpec struct {
+	// enabled defaults to true.
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// schedule is a cron expression in UTC. Defaults to every six hours.
+	// +optional
+	Schedule string `json:"schedule,omitempty"`
+
+	// fileSizeThreshold is the size under which files are rewritten.
+	// Defaults to 128MB.
+	// +optional
+	FileSizeThreshold string `json:"fileSizeThreshold,omitempty"`
+
+	// image is the maintenance runner image. Defaults to
+	// ghcr.io/opsarrayllc/data-platform-dbt-runner.
+	// +optional
+	Image string `json:"image,omitempty"`
 }
 
 // DebeziumSourceSpec is one database captured by its own Debezium Server.

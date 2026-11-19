@@ -21,10 +21,13 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -75,21 +78,39 @@ const (
 	debeziumHeartbeatIntervalMS = "60000"
 	// propDebeziumUpsert is generated, and commonly overridden per source.
 	propDebeziumUpsert = "debezium.sink.iceberg.upsert"
-	// The offset store adds a snapshot to its table on every offset commit
-	// and never expires them. Metadata grows with each one, and once a
-	// commit outlasts offset.flush.timeout.ms the engine stops confirming
-	// the replication slot, so a sidecar expires them on a timer. The table
-	// only ever needs its latest snapshot; the rest is kept for debugging.
+	// The sink and the offset store add a snapshot to their tables on every
+	// commit and never expire them. Metadata grows with each one, and once
+	// an offset commit outlasts offset.flush.timeout.ms the engine stops
+	// confirming the replication slot, so a sidecar expires them on a
+	// timer. The offset table only ever needs its latest snapshot; the rest
+	// is kept for debugging.
 	configMapDebeziumMaintenance = "debezium-maintenance"
-	keyOffsetExpirySource        = "ExpireOffsetSnapshots.java"
+	keySnapshotExpirySource      = "ExpireSnapshots.java"
 	volumeDebeziumMaintenance    = "maintenance"
 	debeziumMaintenanceDir       = "/debezium/maintenance"
-	containerOffsetExpiry        = "offset-expiry"
+	containerSnapshotExpiry      = "snapshot-expiry"
 	offsetExpiryRetainMS         = int64(3600 * 1000)
-	offsetExpiryRetainLast       = 10
-	// offsetExpiryDelaySeconds lets the token proxy and engine start first.
-	offsetExpiryDelaySeconds    = 120
-	offsetExpiryIntervalSeconds = 1800
+	snapshotExpiryRetainLast     = 10
+	// The first run waits snapshotExpiryDelaySeconds, so the token proxy and
+	// engine start first, plus up to snapshotExpiryJitterSeconds picked from
+	// the source name, so pods restarted together don't expire together.
+	snapshotExpiryDelaySeconds    = 120
+	snapshotExpiryJitterSeconds   = 900
+	snapshotExpiryIntervalSeconds = 1800
+	// Compaction runs Trino's optimize through the Transformation runner's
+	// maintenance mode, as the debezium ServiceAccount.
+	nameDebeziumCompaction        = "debezium-compaction"
+	configMapDebeziumTrinoCA      = "debezium-trino-ca"
+	debeziumCompactionTokenDir    = "/var/run/secrets/opsarray"
+	debeziumCompactionCADir       = "/etc/trino-ca"
+	debeziumCompactionTokenSecs   = int64(3600)
+	debeziumCompactionDeadlineSec = int64(3 * 3600)
+	// debeziumCompactionRetention is what the runner passes to Trino's
+	// expire_snapshots and remove_orphan_files. Trino refuses less than its
+	// 7-day minimum; the sidecar keeps far fewer snapshots anyway.
+	debeziumCompactionRetention = "7d"
+	uidDebeziumCompaction       = int64(65532)
+	debeziumTmpDir              = "/tmp"
 	// authTypeOAuth2 is the OAuth2 authentication type in Trino and Iceberg.
 	authTypeOAuth2 = "oauth2"
 )
@@ -148,6 +169,9 @@ func (r *DataLakeReconciler) reconcileDebezium(
 	ns := spec.NamespaceOrDefault()
 	if !spec.IsEnabled() {
 		setCondition(dp, dataplatformv1alpha1.ConditionDebeziumReady, metav1.ConditionTrue, reasonDisabled, "No Debezium sources are configured")
+		if err := r.deleteDebeziumCompaction(ctx, ns); err != nil {
+			return false, err
+		}
 		return false, r.pruneDebeziumSources(ctx, dp, ns, nil)
 	}
 	if !dp.Spec.Lakekeeper.IsEnabled() {
@@ -203,6 +227,9 @@ func (r *DataLakeReconciler) reconcileDebezium(
 	}
 	if err := r.pruneDebeziumSources(ctx, dp, ns, keep); err != nil {
 		return fail(err)
+	}
+	if err := r.reconcileDebeziumCompaction(ctx, dp, ns, oidc); err != nil {
+		return fail(fmt.Errorf("debezium compaction: %w", err))
 	}
 	if len(notReady) > 0 {
 		setCondition(dp, dataplatformv1alpha1.ConditionDebeziumReady, metav1.ConditionFalse, reasonNotReady,
@@ -263,7 +290,7 @@ func (r *DataLakeReconciler) reconcileDebeziumSource(
 
 	// Credentials are hashed too: env vars from a Secret only change on restart.
 	// The expiry program is hashed so pods pick up a new version.
-	cfgHash := hashData(props, user, password, debeziumOffsetExpirySource)
+	cfgHash := hashData(props, user, password, debeziumSnapshotExpirySource)
 	deploy := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: debeziumName(src), Namespace: ns}}
 	return r.apply(ctx, dp, deploy, func() error {
 		ensureLabels(deploy, labels)
@@ -279,7 +306,8 @@ func (r *DataLakeReconciler) reconcileDebeziumSource(
 		deploy.Spec.Template.Annotations[annotationConfigHash] = cfgHash
 		deploy.Spec.Template.Annotations[annotationDoNotDisrupt] = strconv.FormatBool(true)
 		deploy.Spec.Template.Labels = labels
-		deploy.Spec.Template.Spec = debeziumPodSpec(dp.Spec.Debezium.ImageOrDefault(), src, oidc.serviceAccounts)
+		deploy.Spec.Template.Spec = debeziumPodSpec(dp.Spec.Debezium.ImageOrDefault(), src, oidc.serviceAccounts,
+			dp.Spec.Debezium.Maintenance.SnapshotRetentionOrDefault())
 		return nil
 	})
 }
@@ -291,7 +319,12 @@ func stringOr(v, def string) string {
 	return v
 }
 
-func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec, sa serviceAccountTokens) corev1.PodSpec {
+func debeziumPodSpec(
+	image string,
+	src *dataplatformv1alpha1.DebeziumSourceSpec,
+	sa serviceAccountTokens,
+	dataRetention time.Duration,
+) corev1.PodSpec {
 	credentials := debeziumCredentialsSecretName(src)
 	env := make([]corev1.EnvVar, 0, 2+len(src.ExtraEnv))
 	env = append(env,
@@ -326,7 +359,7 @@ func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec,
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: volumeConfig, MountPath: debeziumConfigDir, ReadOnly: true},
 				{Name: volumeData, MountPath: debeziumDataDir},
-				{Name: volumeTmp, MountPath: "/tmp"},
+				{Name: volumeTmp, MountPath: debeziumTmpDir},
 			},
 			ReadinessProbe: &corev1.Probe{
 				ProbeHandler:     health("/q/health/ready"),
@@ -343,7 +376,7 @@ func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec,
 			},
 			Resources:       src.Resources,
 			SecurityContext: restrictedContainerSecurity(uidDebezium, gidDebezium),
-		}, offsetExpiryContainer(image)},
+		}, snapshotExpiryContainer(image, src, dataRetention)},
 		Volumes: []corev1.Volume{
 			{Name: volumeConfig, VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: debeziumConfigSecretName(src)}}},
 			{Name: volumeData, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
@@ -360,27 +393,27 @@ func debeziumPodSpec(image string, src *dataplatformv1alpha1.DebeziumSourceSpec,
 	return spec
 }
 
-// applyDebeziumMaintenanceConfigMap publishes the offset expiry program that
+// applyDebeziumMaintenanceConfigMap publishes the snapshot expiry program that
 // every Debezium pod mounts.
 func (r *DataLakeReconciler) applyDebeziumMaintenanceConfigMap(ctx context.Context, dp *dataplatformv1alpha1.DataLake, ns string) error {
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapDebeziumMaintenance, Namespace: ns}}
 	return r.apply(ctx, dp, cm, func() error {
 		ensureLabels(cm, labelsFor(dp, componentDebezium))
-		cm.Data = map[string]string{keyOffsetExpirySource: debeziumOffsetExpirySource}
+		cm.Data = map[string]string{keySnapshotExpirySource: debeziumSnapshotExpirySource}
 		return nil
 	})
 }
 
-// offsetExpiryContainer expires the offset table's snapshots on a timer. It
-// runs in the Debezium Server image, so it uses the engine's Iceberg libraries,
-// configuration, and credentials (including the token proxy) as they are.
-// A failed run is logged and retried on the next tick; it never stops the
-// engine.
-func offsetExpiryContainer(image string) corev1.Container {
+// snapshotExpiryContainer expires the snapshots of the source's tables on a
+// timer. It runs in the Debezium Server image, so it uses the engine's
+// Iceberg libraries, configuration, and credentials (including the token
+// proxy) as they are. A failed run is logged and retried on the next tick; it
+// never stops the engine.
+func snapshotExpiryContainer(image string, src *dataplatformv1alpha1.DebeziumSourceSpec, dataRetention time.Duration) corev1.Container {
 	run := fmt.Sprintf(
-		`java -XX:-UsePerfData -XX:MaxRAMPercentage=70 -cp '/debezium/lib/*' %s/%s %s/%s %d %d || echo "Offset snapshot expiry failed"`,
-		debeziumMaintenanceDir, keyOffsetExpirySource, debeziumConfigDir, keyDebeziumConfig,
-		offsetExpiryRetainMS, offsetExpiryRetainLast)
+		`java -XX:-UsePerfData -XX:MaxRAMPercentage=70 -cp '/debezium/lib/*' %s/%s %s/%s %d %d %d || echo "Snapshot expiry failed"`,
+		debeziumMaintenanceDir, keySnapshotExpirySource, debeziumConfigDir, keyDebeziumConfig,
+		offsetExpiryRetainMS, dataRetention.Milliseconds(), snapshotExpiryRetainLast)
 	// The trap and backgrounded sleep let the pod stop without waiting out
 	// its termination grace period.
 	script := fmt.Sprintf(`trap 'exit 0' TERM INT
@@ -388,27 +421,211 @@ sleep %d & wait $!
 while true; do
   %s
   sleep %d & wait $!
-done`, offsetExpiryDelaySeconds, run, offsetExpiryIntervalSeconds)
+done`, snapshotExpiryDelay(src), run, snapshotExpiryIntervalSeconds)
 	return corev1.Container{
-		Name:    containerOffsetExpiry,
+		Name:    containerSnapshotExpiry,
 		Image:   image,
 		Command: []string{"/bin/sh", "-c", script},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: volumeConfig, MountPath: debeziumConfigDir, ReadOnly: true},
 			{Name: volumeDebeziumMaintenance, MountPath: debeziumMaintenanceDir, ReadOnly: true},
-			{Name: volumeTmp, MountPath: "/tmp"},
+			{Name: volumeTmp, MountPath: debeziumTmpDir},
 		},
-		// Idle between runs. The limit covers a JVM reading table metadata
-		// with tens of thousands of snapshots, as on the first run against a
-		// table that was never expired.
+		// Idle between runs. The limit covers a JVM reading the metadata and
+		// manifests of tables with tens of thousands of snapshots, as on the
+		// first run against tables that were never expired.
 		Resources: corev1.ResourceRequirements{
 			Requests: corev1.ResourceList{
 				corev1.ResourceCPU:    resource.MustParse("10m"),
 				corev1.ResourceMemory: resource.MustParse("64Mi"),
 			},
-			Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("768Mi")},
+			Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("1Gi")},
 		},
 		SecurityContext: restrictedContainerSecurity(uidDebezium, gidDebezium),
+	}
+}
+
+// snapshotExpiryDelay is the wait before the first expiry run. It is stable
+// per source, so a rollout doesn't reshuffle it, and spread across sources.
+func snapshotExpiryDelay(src *dataplatformv1alpha1.DebeziumSourceSpec) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(src.Name))
+	return snapshotExpiryDelaySeconds + int(h.Sum32()%snapshotExpiryJitterSeconds)
+}
+
+// debeziumCompactionReady reports whether the compaction CronJob can run, and
+// why not; the reason is empty when compaction is turned off. It signs in to
+// Trino with a ServiceAccount token over HTTPS.
+func debeziumCompactionReady(dp *dataplatformv1alpha1.DataLake, oidc oidcConfig) (bool, string) {
+	switch {
+	case !dp.Spec.Debezium.Maintenance.Compaction.IsEnabled():
+		return false, ""
+	case !dp.Spec.Trino.IsEnabled():
+		return false, "Trino is disabled"
+	case !oidc.serviceAccounts.enabled || !trinoTLSEnabled(oidc):
+		return false, "spec.auth.serviceAccountTokens is not set"
+	}
+	return true, ""
+}
+
+// reconcileDebeziumCompaction creates the CronJob that compacts the sources'
+// tables, or removes it when compaction is off or cannot run.
+func (r *DataLakeReconciler) reconcileDebeziumCompaction(
+	ctx context.Context,
+	dp *dataplatformv1alpha1.DataLake,
+	ns string,
+	oidc oidcConfig,
+) error {
+	if ok, why := debeziumCompactionReady(dp, oidc); !ok {
+		if why != "" {
+			logf.FromContext(ctx).V(1).Info("Debezium compaction skipped", "reason", why)
+		}
+		return r.deleteDebeziumCompaction(ctx, ns)
+	}
+	trinoNS := dp.Spec.Trino.NamespaceOrDefault()
+	src := &corev1.ConfigMap{}
+	if err := r.Get(ctx, client.ObjectKey{Name: configMapTrinoCA, Namespace: trinoNS}, src); err != nil {
+		if errors.IsNotFound(err) {
+			// Trino publishes it shortly; the DataLake owns it, so its
+			// creation triggers another reconcile.
+			logf.FromContext(ctx).V(1).Info("Debezium compaction waiting for the Trino CA")
+			return nil
+		}
+		return fmt.Errorf("trino CA ConfigMap %s/%s: %w", trinoNS, configMapTrinoCA, err)
+	}
+	caPEM := src.Data[keyTrinoCA]
+	if caPEM == "" {
+		return fmt.Errorf("trino CA ConfigMap %s/%s has no key %s", trinoNS, configMapTrinoCA, keyTrinoCA)
+	}
+	labels := labelsFor(dp, componentDebezium)
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapDebeziumTrinoCA, Namespace: ns}}
+	if err := r.apply(ctx, dp, ca, func() error {
+		ensureLabels(ca, labels)
+		ca.Data = map[string]string{keyTrinoCA: caPEM}
+		return nil
+	}); err != nil {
+		return err
+	}
+	cron := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: nameDebeziumCompaction, Namespace: ns}}
+	return r.apply(ctx, dp, cron, func() error {
+		ensureLabels(cron, labels)
+		cron.Spec = debeziumCompactionCronJobSpec(dp, oidc, labels)
+		return nil
+	})
+}
+
+func (r *DataLakeReconciler) deleteDebeziumCompaction(ctx context.Context, ns string) error {
+	cron := &batchv1.CronJob{ObjectMeta: metav1.ObjectMeta{Name: nameDebeziumCompaction, Namespace: ns}}
+	if err := client.IgnoreNotFound(r.Delete(ctx, cron, client.PropagationPolicy(metav1.DeletePropagationBackground))); err != nil {
+		return err
+	}
+	ca := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: configMapDebeziumTrinoCA, Namespace: ns}}
+	return client.IgnoreNotFound(r.Delete(ctx, ca))
+}
+
+// debeziumCompactionNamespaces are the Iceberg namespaces the sources write.
+func debeziumCompactionNamespaces(spec *dataplatformv1alpha1.DebeziumSpec) []string {
+	seen := map[string]bool{}
+	var out []string
+	for i := range spec.Sources {
+		ns := spec.Sources[i].IcebergNamespaceOrDefault()
+		if !seen[ns] {
+			seen[ns] = true
+			out = append(out, ns)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// debeziumCompactionCronJobSpec runs the Transformation runner's maintenance
+// mode over every table the sources write: optimize, then expire_snapshots
+// and remove_orphan_files at Trino's minimum retention. Optimize keeps the
+// rewritten rows' sequence numbers, so equality deletes the sink commits
+// meanwhile still apply to them; a commit that does conflict fails that
+// table, and the next run retries it.
+func debeziumCompactionCronJobSpec(
+	dp *dataplatformv1alpha1.DataLake,
+	oidc oidcConfig,
+	labels map[string]string,
+) batchv1.CronJobSpec {
+	spec := &dp.Spec.Debezium
+	compaction := &spec.Maintenance.Compaction
+	trinoNS := dp.Spec.Trino.NamespaceOrDefault()
+	env := []corev1.EnvVar{
+		// The runner's contract is shared with Transformations; these name
+		// this job in its logs.
+		{Name: "TRANSFORM_NAME", Value: nameDebezium},
+		{Name: "TRANSFORM_LANE", Value: "compaction"},
+		{Name: "TRANSFORM_NAMESPACE", Value: spec.NamespaceOrDefault()},
+		{Name: "TRINO_HOST", Value: fmt.Sprintf("%s.%s.svc", nameTrino, trinoNS)},
+		{Name: "TRINO_PORT", Value: strconv.Itoa(int(trinoHTTPSPort))},
+		{Name: "TRINO_CATALOG", Value: dp.Spec.Trino.CatalogOrDefault()},
+		{Name: "TRINO_CA_FILE", Value: debeziumCompactionCADir + "/" + keyTrinoCA},
+		{Name: "TRINO_TOKEN_FILE", Value: debeziumCompactionTokenDir + "/token"},
+		{Name: "MAINTAIN_NAMESPACES", Value: strings.Join(debeziumCompactionNamespaces(spec), ",")},
+		{Name: "MAINTAIN_FILE_SIZE_THRESHOLD", Value: compaction.FileSizeThresholdOrDefault()},
+		{Name: "MAINTAIN_SNAPSHOT_RETENTION", Value: debeziumCompactionRetention},
+		{Name: "HOME", Value: "/work"},
+	}
+	podSecurity := restrictedPodSecurity(uidDebeziumCompaction, uidDebeziumCompaction)
+	return batchv1.CronJobSpec{
+		Schedule:                   compaction.ScheduleOrDefault(),
+		TimeZone:                   ptr.To("Etc/UTC"),
+		ConcurrencyPolicy:          batchv1.ForbidConcurrent,
+		SuccessfulJobsHistoryLimit: ptr.To(int32(1)),
+		FailedJobsHistoryLimit:     ptr.To(int32(3)),
+		JobTemplate: batchv1.JobTemplateSpec{
+			ObjectMeta: metav1.ObjectMeta{Labels: labels},
+			Spec: batchv1.JobSpec{
+				// A failed table is retried on the next tick, not at once.
+				BackoffLimit:          ptr.To(int32(0)),
+				ActiveDeadlineSeconds: ptr.To(debeziumCompactionDeadlineSec),
+				Template: corev1.PodTemplateSpec{
+					ObjectMeta: metav1.ObjectMeta{Labels: labels},
+					Spec: corev1.PodSpec{
+						ServiceAccountName: nameDebezium,
+						RestartPolicy:      corev1.RestartPolicyNever,
+						SecurityContext:    podSecurity,
+						Containers: []corev1.Container{{
+							Name:            "compaction",
+							Image:           compaction.ImageOrDefault(),
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Args:            []string{"maintain"},
+							Env:             env,
+							VolumeMounts: []corev1.VolumeMount{
+								{Name: volumeServiceAccountToken, MountPath: debeziumCompactionTokenDir, ReadOnly: true},
+								{Name: configMapTrinoCA, MountPath: debeziumCompactionCADir, ReadOnly: true},
+								{Name: "work", MountPath: "/work"},
+								{Name: volumeTmp, MountPath: debeziumTmpDir},
+							},
+							Resources: corev1.ResourceRequirements{
+								Requests: corev1.ResourceList{
+									corev1.ResourceCPU:    resource.MustParse("10m"),
+									corev1.ResourceMemory: resource.MustParse("128Mi"),
+								},
+								Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
+							},
+							SecurityContext: restrictedContainerSecurity(uidDebeziumCompaction, uidDebeziumCompaction),
+						}},
+						Volumes: []corev1.Volume{
+							{Name: volumeServiceAccountToken, VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+								Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+									Audience:          oidc.serviceAccounts.audience,
+									ExpirationSeconds: ptr.To(debeziumCompactionTokenSecs),
+									Path:              "token",
+								}}},
+							}}},
+							{Name: configMapTrinoCA, VolumeSource: corev1.VolumeSource{ConfigMap: &corev1.ConfigMapVolumeSource{
+								LocalObjectReference: corev1.LocalObjectReference{Name: configMapDebeziumTrinoCA},
+							}}},
+							{Name: "work", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+							{Name: volumeTmp, VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
+						},
+					},
+				},
+			},
+		},
 	}
 }
 

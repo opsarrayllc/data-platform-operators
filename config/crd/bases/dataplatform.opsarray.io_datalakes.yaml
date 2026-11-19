@@ -711,6 +711,40 @@ spec:
                     description: image is the Debezium Server image. It must bundle
                       the Iceberg sink.
                     type: string
+                  maintenance:
+                    description: |-
+                      maintenance keeps the tables the sources write quick to commit to and
+                      to read.
+                    properties:
+                      compaction:
+                        description: compaction rewrites small data files into larger
+                          ones through Trino.
+                        properties:
+                          enabled:
+                            description: enabled defaults to true.
+                            type: boolean
+                          fileSizeThreshold:
+                            description: |-
+                              fileSizeThreshold is the size under which files are rewritten.
+                              Defaults to 128MB.
+                            type: string
+                          image:
+                            description: |-
+                              image is the maintenance runner image. Defaults to
+                              ghcr.io/opsarrayllc/data-platform-dbt-runner.
+                            type: string
+                          schedule:
+                            description: schedule is a cron expression in UTC. Defaults
+                              to every six hours.
+                            type: string
+                        type: object
+                      snapshotRetention:
+                        description: |-
+                          snapshotRetention is how long data table snapshots are kept, for time
+                          travel. Every day kept is about 1,400 snapshots per busy table.
+                          Defaults to 24h. The offset table always keeps one hour.
+                        type: string
+                    type: object
                   namespace:
                     description: |-
                       namespace is the Kubernetes namespace for Debezium Server. Defaults to

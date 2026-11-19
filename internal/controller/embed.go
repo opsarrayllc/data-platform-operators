@@ -28,8 +28,8 @@ var opaPolicyFS embed.FS
 // opaPolicyDirs are the embedded directories loaded into OPA, in order.
 var opaPolicyDirs = []string{"embed/opapolicies", "embed/rowfilters"}
 
-// debeziumOffsetExpirySource is the Java program each Debezium pod runs to
-// expire its offset table's snapshots. The JDK runs it straight from source.
+// debeziumSnapshotExpirySource is the Java program each Debezium pod runs to
+// expire its tables' snapshots. The JDK runs it straight from source.
 //
-//go:embed embed/debezium/ExpireOffsetSnapshots.java
-var debeziumOffsetExpirySource string
+//go:embed embed/debezium/ExpireSnapshots.java
+var debeziumSnapshotExpirySource string

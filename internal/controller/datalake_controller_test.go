@@ -750,14 +750,14 @@ var _ = Describe("DataLake Controller", func() {
 		Expect(pod.Containers).To(HaveLen(3))
 		Expect(pod.Containers[0].Image).To(Equal(dataplatformv1alpha1.DefaultDebeziumImage))
 		Expect(pod.Containers[0].Env[1].ValueFrom.SecretKeyRef.Name).To(Equal("debezium-orders-db-credentials"))
-		Expect(pod.Containers[1].Name).To(Equal(containerOffsetExpiry))
+		Expect(pod.Containers[1].Name).To(Equal(containerSnapshotExpiry))
 		Expect(pod.Containers[1].Image).To(Equal(dataplatformv1alpha1.DefaultDebeziumImage))
 		Expect(pod.Containers[2].Image).To(Equal(dataplatformv1alpha1.DefaultTokenProxyImage))
 
-		By("publishing the offset expiry program the pods mount")
+		By("publishing the snapshot expiry program the pods mount")
 		maintenance := &corev1.ConfigMap{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: configMapDebeziumMaintenance, Namespace: nameDebezium}, maintenance)).To(Succeed())
-		Expect(maintenance.Data).To(HaveKeyWithValue(keyOffsetExpirySource, debeziumOffsetExpirySource))
+		Expect(maintenance.Data).To(HaveKeyWithValue(keySnapshotExpirySource, debeziumSnapshotExpirySource))
 
 		updated := &dataplatformv1alpha1.DataLake{}
 		Expect(k8sClient.Get(ctx, typeNamespacedName, updated)).To(Succeed())

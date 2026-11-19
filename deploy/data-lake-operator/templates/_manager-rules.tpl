@@ -66,6 +66,7 @@
 - apiGroups:
   - batch
   resources:
+  - cronjobs
   - jobs
   verbs:
   - create

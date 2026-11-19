@@ -1,8 +1,10 @@
 package controller
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/utils/ptr"
@@ -154,23 +156,23 @@ func TestDebeziumPropertiesVendedCredentials(t *testing.T) {
 	}
 }
 
-// TestDebeziumPodSpecOffsetExpiry covers the sidecar that expires the offset
-// table's snapshots: it runs the mounted program with the engine's image and
-// configuration, and shares the token proxy with the engine.
-func TestDebeziumPodSpecOffsetExpiry(t *testing.T) {
+// TestDebeziumPodSpecSnapshotExpiry covers the sidecar that expires the
+// source's table snapshots: it runs the mounted program with the engine's
+// image and configuration, and shares the token proxy with the engine.
+func TestDebeziumPodSpecSnapshotExpiry(t *testing.T) {
 	src := &dataplatformv1alpha1.DebeziumSourceSpec{Name: "billing", Connector: dataplatformv1alpha1.DebeziumConnectorPostgreSQL, Host: "h", Database: "billing"}
-	spec := debeziumPodSpec("debezium:test", src, serviceAccountTokens{enabled: true})
+	spec := debeziumPodSpec("debezium:test", src, serviceAccountTokens{enabled: true}, 6*time.Hour)
 
 	var expiry *corev1.Container
 	names := map[string]bool{}
 	for i := range spec.Containers {
 		names[spec.Containers[i].Name] = true
-		if spec.Containers[i].Name == containerOffsetExpiry {
+		if spec.Containers[i].Name == containerSnapshotExpiry {
 			expiry = &spec.Containers[i]
 		}
 	}
 	if expiry == nil {
-		t.Fatalf("no %s container in %v", containerOffsetExpiry, names)
+		t.Fatalf("no %s container in %v", containerSnapshotExpiry, names)
 	}
 	if !names[nameDebezium] || !names[volumeTokenProxy] {
 		t.Errorf("containers = %v, want the engine and token proxy too", names)
@@ -180,9 +182,11 @@ func TestDebeziumPodSpecOffsetExpiry(t *testing.T) {
 	}
 	script := strings.Join(expiry.Command, " ")
 	for _, want := range []string{
-		debeziumMaintenanceDir + "/" + keyOffsetExpirySource,
+		debeziumMaintenanceDir + "/" + keySnapshotExpirySource,
 		debeziumConfigDir + "/" + keyDebeziumConfig,
-		"3600000 10",
+		// Offset retention, data retention, snapshots always kept.
+		"3600000 21600000 10",
+		fmt.Sprintf("sleep %d & wait", snapshotExpiryDelay(src)),
 		"trap 'exit 0' TERM",
 	} {
 		if !strings.Contains(script, want) {
@@ -205,7 +209,99 @@ func TestDebeziumPodSpecOffsetExpiry(t *testing.T) {
 	if !found {
 		t.Errorf("no %s volume from ConfigMap %s", volumeDebeziumMaintenance, configMapDebeziumMaintenance)
 	}
-	if !strings.Contains(debeziumOffsetExpirySource, "public class ExpireOffsetSnapshots") {
+	if !strings.Contains(debeziumSnapshotExpirySource, "public class ExpireSnapshots") {
 		t.Error("embedded expiry program is missing or renamed")
+	}
+}
+
+// TestSnapshotExpiryDelay checks the first run is spread across sources but
+// stable for each.
+func TestSnapshotExpiryDelay(t *testing.T) {
+	seen := map[int]bool{}
+	for _, name := range []string{"sales", "crm", "billing", "orders-db", "inventory", "payments"} {
+		src := &dataplatformv1alpha1.DebeziumSourceSpec{Name: name}
+		d := snapshotExpiryDelay(src)
+		if d < snapshotExpiryDelaySeconds || d >= snapshotExpiryDelaySeconds+snapshotExpiryJitterSeconds {
+			t.Errorf("%s: delay %d out of range", name, d)
+		}
+		if d != snapshotExpiryDelay(&dataplatformv1alpha1.DebeziumSourceSpec{Name: name}) {
+			t.Errorf("%s: delay is not stable", name)
+		}
+		seen[d] = true
+	}
+	if len(seen) < 5 {
+		t.Errorf("delays %v are not spread out", seen)
+	}
+}
+
+func TestDebeziumCompactionReady(t *testing.T) {
+	sa := oidcConfig{enabled: true, serviceAccounts: serviceAccountTokens{enabled: true, audience: "lakekeeper"}}
+	off := false
+	cases := []struct {
+		name string
+		dp   func(*dataplatformv1alpha1.DataLake)
+		oidc oidcConfig
+		want bool
+	}{
+		{"service account tokens", func(*dataplatformv1alpha1.DataLake) {}, sa, true},
+		{"no auth", func(*dataplatformv1alpha1.DataLake) {}, oidcConfig{}, false},
+		{"keycloak clients", func(*dataplatformv1alpha1.DataLake) {}, oidcConfig{enabled: true}, false},
+		{"trino off", func(dp *dataplatformv1alpha1.DataLake) { dp.Spec.Trino.Enabled = &off }, sa, false},
+		{"disabled", func(dp *dataplatformv1alpha1.DataLake) { dp.Spec.Debezium.Maintenance.Compaction.Enabled = &off }, sa, false},
+	}
+	for _, c := range cases {
+		dp := &dataplatformv1alpha1.DataLake{}
+		c.dp(dp)
+		if got, _ := debeziumCompactionReady(dp, c.oidc); got != c.want {
+			t.Errorf("%s: ready = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestDebeziumCompactionCronJobSpec(t *testing.T) {
+	dp := &dataplatformv1alpha1.DataLake{}
+	dp.Spec.Debezium.Sources = []dataplatformv1alpha1.DebeziumSourceSpec{
+		{Name: "sales"}, {Name: "crm-db"}, {Name: "crm-replica", IcebergNamespace: "crm_db"},
+	}
+	dp.Spec.Debezium.Maintenance.Compaction.Schedule = "0 2 * * *"
+	oidc := oidcConfig{enabled: true, serviceAccounts: serviceAccountTokens{enabled: true, audience: "lakekeeper"}}
+	spec := debeziumCompactionCronJobSpec(dp, oidc, map[string]string{"app": "x"})
+
+	if spec.Schedule != "0 2 * * *" || spec.ConcurrencyPolicy != "Forbid" {
+		t.Errorf("schedule %q, concurrency %q", spec.Schedule, spec.ConcurrencyPolicy)
+	}
+	pod := spec.JobTemplate.Spec.Template.Spec
+	if pod.ServiceAccountName != nameDebezium {
+		t.Errorf("service account = %q", pod.ServiceAccountName)
+	}
+	c := pod.Containers[0]
+	if c.Image != dataplatformv1alpha1.DefaultDebeziumCompactionImage || len(c.Args) != 1 || c.Args[0] != "maintain" {
+		t.Errorf("image %q args %v", c.Image, c.Args)
+	}
+	env := map[string]string{}
+	for _, e := range c.Env {
+		env[e.Name] = e.Value
+	}
+	for k, want := range map[string]string{
+		"MAINTAIN_NAMESPACES":          "crm_db,sales",
+		"MAINTAIN_FILE_SIZE_THRESHOLD": "128MB",
+		"MAINTAIN_SNAPSHOT_RETENTION":  "7d",
+		"TRINO_HOST":                   "trino.trino.svc",
+		"TRINO_PORT":                   "8443",
+		"TRINO_CA_FILE":                debeziumCompactionCADir + "/" + keyTrinoCA,
+		"TRINO_TOKEN_FILE":             debeziumCompactionTokenDir + "/token",
+	} {
+		if env[k] != want {
+			t.Errorf("%s = %q, want %q", k, env[k], want)
+		}
+	}
+	var audience string
+	for _, v := range pod.Volumes {
+		if v.Projected != nil {
+			audience = v.Projected.Sources[0].ServiceAccountToken.Audience
+		}
+	}
+	if audience != "lakekeeper" {
+		t.Errorf("token audience = %q", audience)
 	}
 }

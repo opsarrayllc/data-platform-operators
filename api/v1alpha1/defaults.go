@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 )
@@ -416,6 +417,37 @@ func (s *DebeziumSpec) NamespaceOrDefault() string {
 // ImageOrDefault returns the Debezium Server image.
 func (s *DebeziumSpec) ImageOrDefault() string {
 	return stringOrDefault(s.Image, DefaultDebeziumImage)
+}
+
+// DefaultDebeziumSnapshotRetention is how long data table snapshots are kept.
+const DefaultDebeziumSnapshotRetention = 24 * time.Hour
+
+// SnapshotRetentionOrDefault returns how long data table snapshots are kept.
+func (s *DebeziumMaintenanceSpec) SnapshotRetentionOrDefault() time.Duration {
+	if s.SnapshotRetention == nil || s.SnapshotRetention.Duration <= 0 {
+		return DefaultDebeziumSnapshotRetention
+	}
+	return s.SnapshotRetention.Duration
+}
+
+// IsEnabled reports whether compaction is wanted. Nil defaults to true.
+func (s *DebeziumCompactionSpec) IsEnabled() bool {
+	return boolDefaultTrue(s.Enabled)
+}
+
+// ScheduleOrDefault returns the compaction schedule.
+func (s *DebeziumCompactionSpec) ScheduleOrDefault() string {
+	return stringOrDefault(s.Schedule, DefaultDebeziumCompactionSchedule)
+}
+
+// FileSizeThresholdOrDefault returns optimize's file size threshold.
+func (s *DebeziumCompactionSpec) FileSizeThresholdOrDefault() string {
+	return stringOrDefault(s.FileSizeThreshold, DefaultDebeziumCompactionFileSize)
+}
+
+// ImageOrDefault returns the compaction runner image.
+func (s *DebeziumCompactionSpec) ImageOrDefault() string {
+	return stringOrDefault(s.Image, DefaultDebeziumCompactionImage)
 }
 
 // PortOrDefault returns the source database port.
